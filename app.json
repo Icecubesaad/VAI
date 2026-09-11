@@ -54,6 +54,13 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "a058cd5b-844e-4096-b07d-dfee5ad829ed"
+      }
+    },
+    "owner": "icecubesaad123"
   }
 }
