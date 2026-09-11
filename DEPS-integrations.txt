@@ -1,0 +1,9 @@
+# DEPS — integrations turf (append-only; DO NOT run npm install per brief)
+# Install with:  npx expo install <packages below> --fix   (aligns to Expo SDK 57)
+# Already present (do NOT reinstall): expo-crypto, expo-secure-store, expo-constants, expo-linking, zustand
+
+expo-notifications@^57.0.0   # push registration, scheduling, handlers (lib/push.ts); plugin already in app.json
+expo-device@^57.0.0          # Device.isDevice guard for push (lib/push.ts)
+react-native-purchases@^8.9.0  # RevenueCat StoreKit2 + Play Billing (lib/billing.ts); EAS dev-client required, Expo Go unsupported
+posthog-react-native@^4.4.0  # analytics events (lib/analytics.ts)
+@sentry/react-native@^7.5.0  # error reporting (lib/sentry.ts)

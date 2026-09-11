@@ -1,0 +1,19 @@
+# DEPS-uiux.txt — dependencies appended by UI/UX owner (DO NOT npm install here; founder runs `npm install` + `npx expo install --fix`)
+
+# --- NativeWind v4 (Tailwind v3) — official setup verified Jan 2026 ---
+nativewind
+tailwindcss@^3.4.17
+react-native-reanimated            # NativeWind peer dep (keep plugin LAST in babel if enabled)
+react-native-safe-area-context     # NativeWind peer dep (already present — keep)
+prettier-plugin-tailwindcss@^0.5.11  # dev only, class sorting
+
+# --- gluestack-ui (codegen via CLI, NOT a runtime dep to hand-pin) ---
+# Run: npx gluestack-ui@latest init  →  npx gluestack-ui@latest add button
+# CLI installs its own deps + writes components/ui/gluestack-ui-provider.
+# ThemeProvider (@/theme/ThemeProvider) works standalone until then.
+
+# --- UI kit runtime ---
+expo-haptics                        # lib/haptics.ts (SDK 57 line)
+expo-image                          # GarmentCard / OutfitCard (already? keep)
+react-native-svg                    # SelfieGuide ghost silhouette
+react-native-view-shot              # ShareDNA 1080x1350 export

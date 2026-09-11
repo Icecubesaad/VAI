@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Lint / Typecheck / Doctor
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate release configs (JSON parses + bundle id sync)
+        run: >-
+          node -e "
+          const fs = require('fs');
+          const eas = JSON.parse(fs.readFileSync('eas.json', 'utf8'));
+          const app = JSON.parse(fs.readFileSync('app.json', 'utf8')).expo;
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          for (const p of ['development', 'preview', 'production']) {
+            if (!eas.build || !eas.build[p]) throw new Error('eas.json missing build profile: ' + p);
+          }
+          if (app.ios.bundleIdentifier !== 'com.vai.stylist') throw new Error('iOS bundleIdentifier drift: ' + app.ios.bundleIdentifier);
+          if (app.android.package !== 'com.vai.stylist') throw new Error('Android package drift: ' + app.android.package);
+          if (app.version !== pkg.version) throw new Error('version drift: app.json=' + app.version + ' package.json=' + pkg.version);
+          console.log('release configs OK — profiles: development/preview/production, bundle com.vai.stylist, version ' + app.version);
+          "
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Expo doctor
+        run: npx expo doctor

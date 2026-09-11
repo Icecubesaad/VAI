@@ -1,0 +1,721 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  useWindowDimensions,
+} from 'react-native';
+import type { ViewToken } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { FlashList } from '@shopify/flash-list';
+import NetInfo from '@react-native-community/netinfo';
+import { useTheme } from '@/theme';
+import { EmptyState, ErrorView, ReelCard, ReelSkeleton } from '@/components';
+import { type PoseMode, type ReelCard as ReelCardData, type ReelPose } from '@/lib/api';
+import {
+  COPY_REEL_OFFLINE_REGENERATE,
+  ReelPrefetcher,
+  canRegenerateReelCard,
+  keyById,
+  reelPagerSpec,
+  reportQuotaBlocked,
+  reportReelTti,
+} from '@/lib/perf';
+import { track } from '@/lib/analytics';
+import { supabase } from '@/lib/supabase';
+import { selectClosetList, useCloset } from '@/store/closet';
+import { usePaywall } from '@/store/paywall';
+import { useSession } from '@/store/session';
+import { useTaste } from '@/store/taste';
+import { useTastePrefs } from '@/store/taste-prefs';
+import {
+  MAX_REGENERATES_PER_WEEK,
+  fetchPoseStatus,
+  missingPoses,
+  mondayOf,
+  useReel,
+} from '@/store/reel';
+
+/** expo-router params can arrive as `string | string[]` — take the first non-empty. */
+function firstParam(v: string | string[] | undefined): string | undefined {
+  if (typeof v === 'string') return v.length > 0 ? v : undefined;
+  if (Array.isArray(v)) return v.find((x) => x.length > 0);
+  return undefined;
+}
+
+/**
+ * Normalize the incoming week param to its Monday drop key. The Monday push
+ * deep-links `vai://outfit/<date>` with ANY in-week date — the drop itself is
+ * always keyed by Monday, so Wednesday taps land on the same drop.
+ */
+function weekMondayOfParam(param: string | undefined): string {
+  if (!param) return mondayOf();
+  const d = new Date(param.length === 10 ? `${param}T00:00:00Z` : param);
+  if (Number.isNaN(d.getTime())) return mondayOf();
+  return mondayOf(d);
+}
+
+/** `store/paywall` Tier ('free'|'trial'|'premium') → analytics SubTier ('free'|'premium'). */
+function toAnalyticsTier(tier: string): 'free' | 'premium' {
+  return tier === 'free' ? 'free' : 'premium';
+}
+
+function dropCostUsd(cards: ReelCardData[]): { cost_usd: number; pending_count: number; is_estimated: boolean } {
+  // Server-authoritative drop cost ONLY (P1-3): pending cards read
+  // `imageUrl: ""` + the $0.067 estimate until their renders land (server
+  // contract), so they are excluded from the sum — estimates are never
+  // reported as authoritative. `pending_count` / `is_estimated` mark partial
+  // sums; unit-economics queries must filter `is_estimated !== true`.
+  let cost = 0;
+  let pending = 0;
+  for (const c of cards) {
+    if (c.imageUrl.length === 0) {
+      pending += 1;
+      continue;
+    }
+    if (Number.isFinite(c.costUsd)) cost += c.costUsd;
+  }
+  return { cost_usd: cost, pending_count: pending, is_estimated: pending > 0 };
+}
+
+// ---------------------------------------------------------------------------
+// Screen: 6th tab — vertical full-screen pager, one canonical ReelCard per
+// screen. Prefetch engine owns the current±1 full / ±2 thumb window with
+// cooperative cancel on flings (CONTRACT-perf.md reel pager recipe).
+// Deep links `vai://reel` + `vai://outfit/<date>` land here (root layout).
+// ---------------------------------------------------------------------------
+
+export default function ReelScreen() {
+  const router = useRouter();
+  const { colors } = useTheme();
+  const { height: winH } = useWindowDimensions();
+  const params = useLocalSearchParams<{ weekOf?: string; source?: string }>();
+  const weekOf = weekMondayOfParam(firstParam(params.weekOf));
+  const source = firstParam(params.source);
+
+  const garments = useCloset(selectClosetList);
+  const drop = useReel((s) => s.drop);
+  const cachedWeek = useReel((s) => s.weekOf);
+  const fetching = useReel((s) => s.fetching);
+  const fetchError = useReel((s) => s.fetchError);
+  const savedIds = useReel((s) => s.savedIds);
+  const regeneratingId = useReel((s) => s.regeneratingId);
+  const regensLeft = useReel((s) => s.regeneratesLeft());
+  const ensureWeek = useReel((s) => s.ensureWeek);
+  const refreshWeek = useReel((s) => s.refreshWeek);
+  const styleMyWeek = useReel((s) => s.styleMyWeek);
+  const toggleSave = useReel((s) => s.toggleSave);
+  const userId = useSession((s) => s.userId);
+  const tier = usePaywall((s) => s.tier);
+  const quotaLeft = usePaywall((s) => s.rendersLeft);
+  const quotaCap = usePaywall((s) => (s.tier === 'free' ? s.lifetimeCap : s.monthlyCap));
+
+  const [poses, setPoses] = useState<Record<ReelPose, boolean> | null>(null);
+  const [listH, setListH] = useState<number | null>(null);
+  const [wornIds, setWornIds] = useState<Record<string, true>>({});
+  const [wearPending, setWearPending] = useState<Record<string, true>>({});
+  const [wearError, setWearError] = useState<string | null>(null);
+  const [banner, setBanner] = useState<string | null>(null);
+  const [regenTarget, setRegenTarget] = useState<ReelCardData | null>(null);
+  const [regenNote, setRegenNote] = useState('');
+  const [regenError, setRegenError] = useState<string | null>(null);
+  const [online, setOnline] = useState(true);
+  // Style inspiration (invisible autopilot): no per-remix pose picker. The
+  // remix rides the Settings pose preference — Auto borrows the fresh taste
+  // pose when one exists, else the user's own pose ("My poses only" = keep).
+  const posePreference = useTastePrefs((s) => s.poseModeDefault);
+  const poseRefs = useTaste((s) => s.poseRefs);
+
+  // One prefetcher per screen (holds the cancel generation). Connectivity is
+  // read through a ref so the stable pager callbacks never go stale.
+  const onlineRef = useRef(true);
+  const prefetcherRef = useRef<ReelPrefetcher | null>(null);
+  if (prefetcherRef.current === null) {
+    prefetcherRef.current = new ReelPrefetcher({ isOnline: () => onlineRef.current });
+  }
+  const dataRef = useRef<ReelCardData[]>([]);
+  const lastIndexRef = useRef(0);
+  const viewedRef = useRef<Set<string>>(new Set());
+  const mountMsRef = useRef(Date.now());
+  const ttiReportedRef = useRef(false);
+  const ttiFromCacheRef = useRef(false);
+  const completedWeekRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const sub = NetInfo.addEventListener((s) => {
+      const on = s.isConnected ?? true;
+      onlineRef.current = on;
+      setOnline(on);
+    });
+    void NetInfo.fetch()
+      .then((s) => {
+        const on = s.isConnected ?? true;
+        onlineRef.current = on;
+        setOnline(on);
+      })
+      .catch(() => undefined);
+    return () => sub();
+  }, []);
+
+  useEffect(() => {
+    onlineRef.current = online;
+  }, [online]);
+
+  const load = useCallback(() => {
+    void ensureWeek(weekOf).catch(() => undefined);
+    void fetchPoseStatus().then(setPoses, () => setPoses({ front: false, step: false, detail: false }));
+  }, [ensureWeek, weekOf]);
+  useEffect(load, [load]);
+
+  // Open attribution (once per mount) + snapshot whether the drop was already
+  // cached (drives the TTI `from_cache` budget split).
+  useEffect(() => {
+    const st = useReel.getState();
+    ttiFromCacheRef.current = st.drop !== null && st.weekOf === weekOf;
+    const uid = useSession.getState().userId;
+    if (uid) {
+      track('reel_opened', {
+        user_id: uid,
+        tier: toAnalyticsTier(usePaywall.getState().tier),
+        ...(source ? { source } : {}),
+        week_start: weekOf,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const cards = drop && cachedWeek === weekOf ? drop.cards : null;
+  dataRef.current = cards ?? [];
+  const pageH = listH ?? winH;
+
+  // First card interactive → TTI; drop on screen → weekly_drop_completed with
+  // the server-authoritative cost sum (REQUIRED props — pending-card estimates
+  // excluded via dropCostUsd, flagged estimated vs final).
+  useEffect(() => {
+    if (!cards || cards.length === 0 || poses === null) return;
+    if (!ttiReportedRef.current) {
+      ttiReportedRef.current = true;
+      reportReelTti(Date.now() - mountMsRef.current, { fromCache: ttiFromCacheRef.current });
+    }
+    if (completedWeekRef.current !== weekOf) {
+      completedWeekRef.current = weekOf;
+      const uid = useSession.getState().userId;
+      if (uid) {
+        const cost = dropCostUsd(cards);
+        track('weekly_drop_completed', {
+          user_id: uid,
+          tier: toAnalyticsTier(usePaywall.getState().tier),
+          card_count: cards.length,
+          cost_usd: cost.cost_usd,
+          is_estimated: cost.is_estimated,
+          pending_count: cost.pending_count,
+        });
+      }
+    }
+  }, [cards, poses, weekOf]);
+
+  const garmentThumbs = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const g of garments) map[g.id] = g.cutoutUrl ?? g.imageUrl;
+    return map;
+  }, [garments]);
+
+  const onViewableItemsChanged = useCallback(
+    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+      const first = viewableItems[0];
+      const idx = typeof first?.index === 'number' ? first.index : 0;
+      lastIndexRef.current = idx;
+      const data = dataRef.current;
+      if (data.length > 0) {
+        prefetcherRef.current?.update(
+          data.map((c) => ({ id: c.id, fullResUrl: c.imageUrl, thumbUrl: c.imageUrl })),
+          idx,
+        );
+      }
+      const raw = first?.item as ReelCardData | undefined;
+      const card = raw && typeof raw.id === 'string' ? raw : data[idx];
+      if (card && !viewedRef.current.has(card.id)) {
+        viewedRef.current.add(card.id);
+        const uid = useSession.getState().userId;
+        if (uid) {
+          track('reel_card_viewed', {
+            user_id: uid,
+            tier: toAnalyticsTier(usePaywall.getState().tier),
+            card_index: idx,
+            pose: card.pose,
+          });
+        }
+      }
+    },
+    [],
+  );
+
+  const onMomentumBegin = useCallback(() => {
+    prefetcherRef.current?.notifyFling(true);
+  }, []);
+
+  const onMomentumEnd = useCallback(() => {
+    const p = prefetcherRef.current;
+    if (!p) return;
+    p.notifyFling(false);
+    const data = dataRef.current;
+    if (data.length > 0) {
+      p.update(
+        data.map((c) => ({ id: c.id, fullResUrl: c.imageUrl, thumbUrl: c.imageUrl })),
+        lastIndexRef.current,
+      );
+    }
+  }, []);
+
+  // Wear-it-today → `increment_wear` RPC + local mirror (wear counts + CPW
+  // update instantly) + worn mark. Failures surface inline, never silent.
+  const handleWear = useCallback(
+    (card: ReelCardData) => {
+      if (wornIds[card.id] || wearPending[card.id]) return;
+      setWearPending((p) => ({ ...p, [card.id]: true }));
+      setWearError(null);
+      void (async () => {
+        try {
+          const { error } = await supabase.rpc('increment_wear', { ids: card.garmentIds });
+          if (error) throw error;
+          const st = useCloset.getState();
+          for (const gid of card.garmentIds) {
+            const g = st.items[gid];
+            if (g) {
+              const wearCount = g.wearCount + 1;
+              st.upsert({
+                ...g,
+                wearCount,
+                costPerWear: g.pricePaid != null ? g.pricePaid / wearCount : null,
+              });
+            }
+          }
+          setWornIds((prev) => ({ ...prev, [card.id]: true }));
+          const uid = useSession.getState().userId;
+          if (uid) {
+            track('reel_wear_it_today', {
+              user_id: uid,
+              tier: toAnalyticsTier(usePaywall.getState().tier),
+              date: new Date().toISOString().slice(0, 10),
+              pose: card.pose,
+            });
+          }
+        } catch {
+          setWearError('Could not log this outfit. Check your connection and try again.');
+        } finally {
+          setWearPending((p) => {
+            const next = { ...p };
+            delete next[card.id];
+            return next;
+          });
+        }
+      })();
+    },
+    [wornIds, wearPending],
+  );
+
+  // Try → try-on studio with the card's render context (real outfit id only;
+  // the studio falls back to garment_refs when it is absent).
+  const handleTry = useCallback(
+    (card: ReelCardData) => {
+      router.push({
+        pathname: '/(tabs)/tryon',
+        params: {
+          ...(card.outfitId ? { outfitId: card.outfitId } : {}),
+          garmentIds: card.garmentIds.join(','),
+        },
+      });
+    },
+    [router],
+  );
+
+  // Shop → shop tab scoped to the card's outfit (gap items) + shop-tap event.
+  const handleShop = useCallback(
+    (card: ReelCardData) => {
+      const uid = useSession.getState().userId;
+      if (uid) {
+        const idx = dataRef.current.findIndex((c) => c.id === card.id);
+        track('reel_shop_tap', {
+          user_id: uid,
+          tier: toAnalyticsTier(usePaywall.getState().tier),
+          ...(idx >= 0 ? { card_index: idx } : {}),
+        });
+      }
+      router.push({
+        pathname: '/(tabs)/shop',
+        params: { ...(card.outfitId ? { outfitId: card.outfitId } : {}) },
+      });
+    },
+    [router],
+  );
+
+  // Save → local MMKV truth (persisted across reinstalls). NOTE: the
+  // `post_saves` table is social-feed scope (docs/SECURITY.md §1 — v2), so
+  // there is no v1 server row for a reel card; local is the source of truth.
+  const handleSave = useCallback(
+    (cardId: string) => {
+      toggleSave(cardId);
+    },
+    [toggleSave],
+  );
+
+  // Regenerate entry: offline gate first (perf recipe), then render-quota
+  // gate (1 credit — exhausted render pool routes to paywall), then the
+  // weekly remix budget mirror (server is truth, 3/wk).
+  const openRegen = useCallback((card: ReelCardData) => {
+    if (!canRegenerateReelCard(onlineRef.current)) {
+      setBanner(COPY_REEL_OFFLINE_REGENERATE);
+      return;
+    }
+    setBanner(null);
+    setRegenNote('');
+    setRegenError(null);
+    setRegenTarget(card);
+  }, []);
+
+  const regenBusy = regenTarget !== null && regeneratingId === regenTarget.id;
+  // Auto pose for the remix: fresh taste pin wins, else the user's own pose.
+  const regenFreshPin = regenTarget !== null ? (poseRefs[0] ?? null) : null;
+  const regenPose: PoseMode = posePreference === 'auto' && regenFreshPin ? 'adapt' : 'keep';
+  const regenPoseRef = regenPose === 'adapt' ? (regenFreshPin?.id ?? null) : null;
+
+  const submitRegen = useCallback(() => {
+    const target = regenTarget;
+    if (!target || (regeneratingId !== null && regeneratingId === target.id)) return;
+    if (!canRegenerateReelCard(onlineRef.current)) {
+      setRegenError(COPY_REEL_OFFLINE_REGENERATE);
+      return;
+    }
+    const paywall = usePaywall.getState();
+    if (paywall.rendersLeft <= 0) {
+      reportQuotaBlocked(
+        paywall.tier === 'free' ? 'free_lifetime_exhausted' : 'monthly_exhausted',
+        'reel_regenerate',
+      );
+      setRegenTarget(null);
+      router.push('/onboarding/paywall');
+      return;
+    }
+    if (useReel.getState().regeneratesLeft() <= 0) {
+      setRegenError(`Weekly remix budget used — ${MAX_REGENERATES_PER_WEEK} per week, resets Monday.`);
+      return;
+    }
+    // Auto pose always resolves (keep, or adapt with the fresh taste pin).
+    setRegenError(null);
+    void (async () => {
+      const updated = await useReel.getState().regenerate(target.id, regenNote, {
+        poseMode: regenPose,
+        ...(regenPose === 'adapt' && regenPoseRef ? { poseRefId: regenPoseRef } : {}),
+      });
+      if (updated) {
+        const uid = useSession.getState().userId;
+        if (uid) {
+          const idx = useReel.getState().drop?.cards.findIndex((c) => c.id === updated.id) ?? -1;
+          track('reel_card_regenerated', {
+            user_id: uid,
+            tier: toAnalyticsTier(usePaywall.getState().tier),
+            ...(idx >= 0 ? { card_index: idx } : {}),
+            pose: updated.pose,
+            render_id: updated.renderId,
+            cost_usd: updated.costUsd,
+          });
+          // Remix is a pose selection point (gate 10): the pose_mode the
+          // regenerate actually ran with, tied to the fresh render.
+          track('pose_mode_selected', {
+            user_id: uid,
+            tier: toAnalyticsTier(usePaywall.getState().tier),
+            pose_mode: regenPose,
+            render_id: updated.renderId,
+          });
+        }
+        setRegenTarget(null);
+        setRegenNote('');
+      } else if (useReel.getState().regeneratesLeft() <= 0) {
+        setRegenError(`Weekly remix budget used — ${MAX_REGENERATES_PER_WEEK} per week, resets Monday.`);
+      } else {
+        setRegenError('Could not remix this look. Please try again.');
+      }
+    })();
+  }, [regenTarget, regeneratingId, regenNote, regenPose, regenPoseRef, router]);
+
+  // "Style my week" → POST reel-drop. Client pre-gate (P2-5, mirrors the
+  // regen path): offline → banner, missing poses → pose-pack, exhausted
+  // render pool → paywall — so exhausted users get the upsell sheet instead
+  // of a generic fetch error. weekly_drop_started carries the
+  // server-authoritative cost sum (REQUIRED — pending estimates excluded).
+  const handleStyleWeek = useCallback(() => {
+    if (!onlineRef.current) {
+      setBanner(COPY_REEL_OFFLINE_REGENERATE);
+      return;
+    }
+    if (poses && missingPoses(poses).length > 0) {
+      router.push('/pose-pack');
+      return;
+    }
+    const paywall = usePaywall.getState();
+    if (paywall.rendersLeft <= 0) {
+      reportQuotaBlocked(
+        paywall.tier === 'free' ? 'free_lifetime_exhausted' : 'monthly_exhausted',
+        'reel_style_week',
+      );
+      router.push('/onboarding/paywall');
+      return;
+    }
+    setBanner(null);
+    void (async () => {
+      const fresh = await styleMyWeek(weekOf);
+      const uid = useSession.getState().userId;
+      if (uid && fresh && fresh.cards.length > 0) {
+        const cost = dropCostUsd(fresh.cards);
+        track('weekly_drop_started', {
+          user_id: uid,
+          tier: toAnalyticsTier(usePaywall.getState().tier),
+          card_count: fresh.cards.length,
+          cost_usd: cost.cost_usd,
+          is_estimated: cost.is_estimated,
+          pending_count: cost.pending_count,
+        });
+      }
+    })();
+  }, [styleMyWeek, weekOf, poses, router]);
+
+  const renderItem = useCallback(
+    ({ item }: { item: ReelCardData }) => (
+      <View style={{ height: pageH }} testID={`reel-page-${item.id}`}>
+        <ReelCard
+          card={item}
+          onWear={() => handleWear(item)}
+          onTry={() => handleTry(item)}
+          onShop={() => handleShop(item)}
+          onSave={() => handleSave(item.id)}
+          onRegenerate={() => openRegen(item)}
+          saved={savedIds[item.id] === true}
+          garmentThumbs={garmentThumbs}
+          quotaLeft={quotaLeft}
+          quotaCap={quotaCap}
+          onUpgrade={() => router.push('/onboarding/paywall')}
+          loading={regeneratingId === item.id}
+          testID={`reel-card-${item.id}`}
+        />
+      </View>
+    ),
+    [
+      pageH,
+      handleWear,
+      handleTry,
+      handleShop,
+      handleSave,
+      openRegen,
+      savedIds,
+      garmentThumbs,
+      quotaLeft,
+      quotaCap,
+      regeneratingId,
+      router,
+    ],
+  );
+
+  const missing = poses ? missingPoses(poses) : [];
+  const tierLabel =
+    drop && cachedWeek === weekOf ? (drop.tier === 'teaser' ? ' · Teaser' : ' · Full drop') : '';
+
+  return (
+    <View style={[styles.root, { backgroundColor: colors.background }]} testID="reel-screen">
+      <View style={styles.header}>
+        <View>
+          <Text style={[styles.title, { color: colors.text }]}>Your week</Text>
+          <Text style={[styles.sub, { color: colors.muted }]} testID="reel-week">
+            Week of {weekOf}
+            {tierLabel}
+          </Text>
+        </View>
+        <Pressable
+          onPress={() => void refreshWeek(weekOf)}
+          disabled={fetching}
+          hitSlop={12}
+          testID="reel-refresh"
+          accessibilityLabel="Refresh weekly reel"
+          accessibilityRole="button"
+        >
+          <Text style={[styles.refresh, { color: colors.primary }]}>{fetching ? '…' : 'Refresh'}</Text>
+        </Pressable>
+      </View>
+
+      {!!banner && (
+        <Text style={[styles.banner, { color: colors.muted }]} testID="reel-banner">
+          {banner}
+        </Text>
+      )}
+      {!!wearError && (
+        <Text style={[styles.bannerError, { color: colors.danger }]} testID="reel-wear-error">
+          {wearError}
+        </Text>
+      )}
+      {!online && !banner && (
+        <Text style={[styles.banner, { color: colors.muted }]} testID="reel-offline">
+          You&apos;re offline — showing your saved drop.
+        </Text>
+      )}
+
+      {poses === null || (fetching && cards === null) ? (
+        <View style={styles.list} testID="reel-loading">
+          <ReelSkeleton />
+        </View>
+      ) : missing.length > 0 ? (
+        <View style={styles.body} testID="reel-pose-empty">
+          <EmptyState
+            title="Your reel needs 3 poses"
+            body={`Capture ${missing.join(', ')} to unlock full-body weekly looks styled for you.`}
+            actionTitle="Capture pose pack"
+            onAction={() => router.push('/pose-pack')}
+          />
+        </View>
+      ) : fetchError && cards === null ? (
+        <View style={styles.body} testID="reel-error">
+          <ErrorView message={fetchError} onRetry={() => void refreshWeek(weekOf)} retrying={fetching} />
+        </View>
+      ) : cards === null || cards.length === 0 ? (
+        <View style={styles.body} testID="reel-drop-empty">
+          <EmptyState
+            title="No drop yet this week"
+            body="Fresh looks land every Monday. Style your week now — seven outfits, three poses."
+            actionTitle={fetching ? 'Styling…' : 'Style my week'}
+            onAction={handleStyleWeek}
+          />
+          {!!fetchError && <Text style={[styles.loadingText, { color: colors.danger }]}>{fetchError}</Text>}
+        </View>
+      ) : (
+        <View style={styles.list} testID="reel-pager" onLayout={(e) => setListH(e.nativeEvent.layout.height)}>
+          {!!fetchError && (
+            <Text style={[styles.stale, { color: colors.muted }]} testID="reel-stale">
+              Showing your saved drop — refresh failed.
+            </Text>
+          )}
+          <FlashList
+            {...reelPagerSpec(pageH)}
+            data={cards}
+            keyExtractor={keyById}
+            renderItem={renderItem}
+            onViewableItemsChanged={onViewableItemsChanged}
+            viewabilityConfig={{ itemVisiblePercentThreshold: 70 }}
+            onMomentumScrollBegin={onMomentumBegin}
+            onMomentumScrollEnd={onMomentumEnd}
+            showsVerticalScrollIndicator={false}
+            decelerationRate="fast"
+          />
+        </View>
+      )}
+
+      {/* Remix note sheet: stylist note → POST reel-regenerate (1 credit). */}
+      <Modal
+        visible={regenTarget !== null}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setRegenTarget(null)}
+      >
+        <View style={styles.sheetScrim}>
+          <View style={[styles.sheetBox, { backgroundColor: colors.surface }]} testID="regen-sheet">
+            <Text style={[styles.sheetTitle, { color: colors.text }]}>Remix this look</Text>
+            <Text style={[styles.sheetSub, { color: colors.muted }]} testID="regen-budget">
+              {regensLeft} of {MAX_REGENERATES_PER_WEEK} remixes left this week · 1 credit each
+            </Text>
+            <TextInput
+              value={regenNote}
+              onChangeText={setRegenNote}
+              placeholder="Note for the stylist (optional, e.g. warmer light)"
+              maxLength={280}
+              style={[styles.regenInput, { borderColor: colors.border, color: colors.text }]}
+              placeholderTextColor={colors.muted}
+              testID="regen-note"
+            />
+            {!!regenError && (
+              <Text style={[styles.regenErrorText, { color: colors.danger }]} testID="regen-error">
+                {regenError}
+              </Text>
+            )}
+            {regenPose === 'adapt' && (
+              <Text style={[styles.tasteCaption, { color: colors.muted }]} testID="regen-taste-caption">
+                Styled with your inspiration · Auto
+              </Text>
+            )}
+            <View style={styles.sheetRow}>
+              <Pressable
+                style={[styles.sheetBtn, { borderColor: colors.border, borderWidth: 1 }]}
+                onPress={() => setRegenTarget(null)}
+                testID="regen-cancel"
+              >
+                <Text style={[styles.sheetBtnText, { color: colors.text }]}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.sheetBtn,
+                  { backgroundColor: colors.primary },
+                  (regenBusy || regensLeft <= 0) && styles.disabled,
+                ]}
+                onPress={submitRegen}
+                disabled={regenBusy || regensLeft <= 0}
+                testID="regen-submit"
+              >
+                {regenBusy ? (
+                  <ActivityIndicator color={colors.onPrimary} />
+                ) : (
+                  <Text style={[styles.sheetBtnText, { color: colors.onPrimary }]}>Remix</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 60,
+    paddingBottom: 10,
+  },
+  title: { fontSize: 24, fontWeight: '700' },
+  sub: { fontSize: 13, marginTop: 2 },
+  refresh: { fontSize: 15, fontWeight: '600' },
+  banner: { fontSize: 12, textAlign: 'center', paddingHorizontal: 16, paddingBottom: 6 },
+  bannerError: { fontSize: 12, textAlign: 'center', paddingHorizontal: 16, paddingBottom: 6 },
+  stale: { fontSize: 12, textAlign: 'center', paddingVertical: 6 },
+  body: { flex: 1, padding: 16, gap: 12, justifyContent: 'center' },
+  list: { flex: 1 },
+  loadingText: { fontSize: 14, textAlign: 'center' },
+  sheetScrim: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' },
+  sheetBox: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, gap: 10 },
+  sheetTitle: { fontSize: 18, fontWeight: '700' },
+  sheetSub: { fontSize: 13 },
+  regenInput: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+  },
+  regenErrorText: { fontSize: 13 },
+  tasteCaption: { fontSize: 12 },
+  poseRow: { flexDirection: 'row', gap: 8 },
+  poseSeg: { flex: 1, borderWidth: 1, borderRadius: 999, paddingVertical: 8, alignItems: 'center' },
+  poseSegText: { fontSize: 13, fontWeight: '600' },
+  pinHead: { flexDirection: 'row', gap: 10, alignItems: 'center' },
+  pinThumb: { width: 44, height: 56, borderRadius: 8, backgroundColor: '#EDE8E0' },
+  pinToggle: { fontSize: 14, fontWeight: '600' },
+  pinGrid: { gap: 8, marginTop: 8 },
+  pinCell: { width: 96, height: 128, borderRadius: 10, backgroundColor: '#EDE8E0' },
+  sheetRow: { flexDirection: 'row', gap: 10 },
+  sheetBtn: { flex: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  sheetBtnText: { fontSize: 15, fontWeight: '700' },
+  disabled: { opacity: 0.5 },
+});

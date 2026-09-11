@@ -1,0 +1,59 @@
+{
+  "expo": {
+    "name": "VAI — AI Stylist",
+    "slug": "vai-stylist",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "vai",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.vai.stylist",
+      "infoPlist": {
+        "NSCameraUsageDescription": "VAI uses your camera to photograph garments and your mirror selfie for try-ons only. Photos are never public without your opt-in.",
+        "NSPhotoLibraryUsageDescription": "VAI imports garment photos you choose, to build your digital closet.",
+        "NSUserTrackingUsageDescription": "Used only for measuring which features help you, never for ads."
+      }
+    },
+    "android": {
+      "package": "com.vai.stylist",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FAF8F5"
+      },
+      "permissions": [
+        "CAMERA",
+        "READ_MEDIA_IMAGES",
+        "POST_NOTIFICATIONS"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#FAF8F5"
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#1A1A1A"
+        }
+      ],
+      "expo-image",
+      "@sentry/react-native"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

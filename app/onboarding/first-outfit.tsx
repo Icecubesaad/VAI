@@ -1,0 +1,168 @@
+import { useCallback, useMemo } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
+import { useQuery } from '@tanstack/react-query';
+import { useTheme } from '@/theme';
+import { OutfitCard } from '@/components';
+import { api, apiErrorCopy } from '@/lib/api';
+import { useSession } from '@/store/session';
+import { useCloset, selectClosetList } from '@/store/closet';
+import { useQuiz } from '@/store/quiz';
+import { usePaywall, shouldTriggerPaywall } from '@/store/paywall';
+
+/** Offline/AI-failure fallback: first 3 closet pieces + generic why-line. */
+const FALLBACK_WHY = 'Starter look from your first pieces — AI styling refines as your closet grows.';
+
+/**
+ * First-outfit hero (aha moment). After seen → paywall gate:
+ * quiz_done && closet>=3 && first_outfit_seen && !trial && !sub.
+ */
+export default function FirstOutfit() {
+  const router = useRouter();
+  const { colors } = useTheme();
+  const garments = useCloset(selectClosetList);
+  const count = useCloset((s) => s.order.length);
+  const quizDone = useQuiz((s) => s.quizDone);
+  const tier = usePaywall((s) => s.tier);
+  const markSeen = useSession((s) => s.setFirstOutfitSeen);
+  const setStep = useSession((s) => s.setOnboardingStep);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const outfitQuery = useQuery({
+    queryKey: ['plan-day', today],
+    queryFn: () => api.planDay({ date: today }),
+    staleTime: 1000 * 60 * 60,
+  });
+
+  const outfit = outfitQuery.data;
+  const outfitGarments = (outfit?.garmentIds ?? [])
+    .map((id) => garments.find((g) => g.id === id))
+    .filter((g) => g !== undefined);
+
+  // Fallback template when AI fails or returns nothing: never a dead end.
+  // Closet items are local (MMKV) so this renders offline; Continue stays live.
+  const fallbackImages = useMemo(
+    () => garments.slice(0, 3).map((g) => g.cutoutUrl ?? g.imageUrl),
+    [garments],
+  );
+  const showFallback = (outfitQuery.isError || (!outfitQuery.isPending && !outfit)) && fallbackImages.length > 0;
+
+  const goBack = useCallback(() => {
+    setStep('closet');
+    router.replace('/onboarding/closet-min3');
+  }, [router, setStep]);
+
+  const goNext = useCallback(() => {
+    markSeen();
+    const hit = shouldTriggerPaywall({
+      quizDone,
+      closetCount: count,
+      firstOutfitSeen: true,
+      tier,
+    });
+    if (hit) {
+      usePaywall.getState().setPlacement('first_outfit');
+      setStep('paywall');
+      router.replace('/onboarding/paywall');
+    } else {
+      setStep('done');
+      router.replace('/(tabs)');
+    }
+  }, [count, markSeen, quizDone, router, setStep, tier]);
+
+  return (
+    <View style={[styles.root, { backgroundColor: colors.background }]} testID="first-outfit">
+      <Text style={[styles.kicker, { color: colors.muted }]}>Your first outfit</Text>
+
+      {outfitQuery.isPending && !showFallback ? (
+        <View style={styles.state} testID="first-outfit-loading">
+          <ActivityIndicator size="large" />
+          <Text style={[styles.body, { color: colors.muted }]}>
+            Styling your first look from your {count} items…
+          </Text>
+        </View>
+      ) : outfit ? (
+        <View>
+          <OutfitCard
+            outfitId={outfit.id}
+            garmentImages={outfitGarments.map((g) => g.cutoutUrl ?? g.imageUrl)}
+            whyLine={outfit.whyLine}
+            hero
+          />
+          <Text style={[styles.why, { color: colors.muted }]} testID="first-outfit-why">
+            {outfit.whyLine}
+          </Text>
+        </View>
+      ) : showFallback ? (
+        <View>
+          <OutfitCard outfitId="local-fallback" garmentImages={fallbackImages} whyLine={FALLBACK_WHY} hero />
+          <Text style={[styles.why, { color: colors.muted }]} testID="first-outfit-fallback">
+            {outfitQuery.isError
+              ? `${apiErrorCopy(outfitQuery.error).message} Showing your starter look instead — you can retry or continue.`
+              : 'Add a few more items and we will style your first look.'}
+          </Text>
+          {outfitQuery.isError && (
+            <Pressable
+              style={[styles.retry, { borderColor: colors.border, borderWidth: 1 }]}
+              onPress={() => void outfitQuery.refetch()}
+              testID="first-outfit-retry"
+            >
+              <Text style={[styles.retryText, { color: colors.text }]}>Try again (free)</Text>
+            </Pressable>
+          )}
+        </View>
+      ) : (
+        <View style={styles.state} testID="first-outfit-error">
+          <Text style={[styles.title, { color: colors.text }]}>
+            {outfitQuery.isError ? apiErrorCopy(outfitQuery.error).title : 'No outfit yet'}
+          </Text>
+          <Text style={[styles.body, { color: colors.muted }]}>
+            {outfitQuery.isError
+              ? apiErrorCopy(outfitQuery.error).message
+              : 'Add a few more items and we will style your first look.'}
+          </Text>
+          {outfitQuery.isError && (
+            <Pressable
+              style={[styles.button, { backgroundColor: colors.primary }]}
+              onPress={() => void outfitQuery.refetch()}
+              testID="first-outfit-retry"
+            >
+              <Text style={[styles.buttonText, { color: colors.onPrimary }]}>Try again</Text>
+            </Pressable>
+          )}
+        </View>
+      )}
+
+      <View>
+        <Pressable
+          style={[
+            styles.button,
+            { backgroundColor: outfit || showFallback ? colors.primary : colors.border },
+          ]}
+          onPress={goNext}
+          disabled={!outfit && !showFallback}
+          testID="first-outfit-continue"
+        >
+          <Text style={[styles.buttonText, { color: colors.onPrimary }]}>Continue</Text>
+        </Pressable>
+        <Pressable onPress={goBack} testID="first-outfit-back">
+          <Text style={[styles.back, { color: colors.muted }]}>← Back (items are kept)</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1, padding: 24, paddingTop: 64, justifyContent: 'space-between' },
+  kicker: { fontSize: 13, fontWeight: '700', textTransform: 'uppercase' },
+  title: { fontSize: 22, fontWeight: '700', textAlign: 'center' },
+  body: { fontSize: 14, textAlign: 'center', lineHeight: 20 },
+  why: { fontSize: 14, lineHeight: 20, marginTop: 12 },
+  state: { alignItems: 'center', gap: 12, paddingVertical: 48 },
+  button: { borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginBottom: 16 },
+  buttonText: { fontSize: 16, fontWeight: '700' },
+  back: { fontSize: 14, textAlign: 'center', marginBottom: 16 },
+  retry: { borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginTop: 12 },
+  retryText: { fontSize: 14, fontWeight: '600' },
+});

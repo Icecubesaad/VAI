@@ -1,0 +1,20 @@
+# Frontend deps to add (DO NOT run npm install — founder agent installs)
+# Expo SDK 57 / RN 0.86 / React 19.2 / Expo Router. Align natives with `npx expo install --fix`.
+
+expo-image@^57.0.0                    # ONLY image component (never RN Image)
+@shopify/flash-list@^2.0.0            # grids (closet, shop)
+@tanstack/react-query@^5.0.0          # server state (plan-day, shop-picks, paywall-status)
+@supabase/supabase-js@^2.45.0         # client in lib/supabase.ts (SecureStore session)
+react-native-mmkv@^3.0.0              # zustand persist backing (store/mmkv.ts)
+expo-apple-authentication@^57.0.0     # native Apple credential → signInWithIdToken
+expo-auth-session@^57.0.0             # Google OAuth code-exchange via Supabase
+expo-camera@^57.0.0                   # selfie-capture (CameraView + guide overlay)
+expo-image-picker@^57.0.0             # closet single-item camera capture
+expo-file-system@^57.0.0              # base64 read for Storage uploads
+expo-font@^57.0.0                     # splash+font gate in app/_layout.tsx (UI/UX adds files)
+base64-arraybuffer@^1.0.2             # base64 → ArrayBuffer for Storage uploads
+
+# Already in package.json (no action): expo, react, react-native, expo-status-bar,
+# expo-router, expo-constants, expo-linking, expo-splash-screen, expo-system-ui,
+# expo-font(missing-add above), react-native-safe-area-context, react-native-screens,
+# expo-secure-store, expo-crypto, zustand

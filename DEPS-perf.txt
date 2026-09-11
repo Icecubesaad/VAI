@@ -1,0 +1,14 @@
+# DEPS-perf.txt — perf-turf dependencies (APPEND-ONLY, do NOT npm install here)
+# Founder agent runs: npx expo install --fix  (aligns expo-* to SDK 57)
+# Rule: expo-* via `npx expo install <name>` (never hand-pin); non-expo pinned below.
+# Already present (DO NOT reinstall): expo-crypto, expo-splash-screen, zustand.
+
+expo-image                    # expo install — ALL remote images (cachePolicy memory-disk, prefetch, recyclingKey). Justified: memory-bounded decode + disk cache RN Image lacks.
+expo-image-manipulator        # expo install — resize/compress (garment WebP 1024, base 1080x1920, 96px QA thumbs). Justified: native, no JS pixel cost.
+expo-image-picker             # expo install — camera/library capture source for garments + base photo (mediaTypes images, quality 1, exif). Justified: capture entry of pipeline.
+expo-file-system              # expo install — file size/progress/chunk reads; import 'expo-file-system/legacy' (getInfoAsync, readAsStringAsync Base64). Justified: upload + resume need bytes.
+@shopify/flash-list@^2.0.0    # grids (closet 3-col, shop 2-col) — recycling + overrideItemLayout for 60fps. Justified: FlatList janks past ~50 photos on low-end Android.
+react-native-mmkv@^3.0.0      # sync mmap caches (closet/DNA/quota/paywall/outbox/sessions). Justified: AsyncStorage is async+slow, SecureStore is for secrets only.
+@react-native-community/netinfo@^11.4.1  # online/offline signal for render hard-fail + outbox flush. Justified: single source of connectivity truth.
+jpeg-js@^0.4.4                # pure-JS decode of 96px thumbs for REAL blur (Laplacian var) + luminance. ~30KB, Hermes-safe. Justified: no ML kit fits the bundle budget.
+@types/jpeg-js (dev)          # types for above.

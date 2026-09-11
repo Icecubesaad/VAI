@@ -1,0 +1,48 @@
+{
+  "cli": {
+    "requireCommit": true,
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "channel": "development",
+      "env": {
+        "APP_ENV": "development",
+        "EXPO_PUBLIC_APP_ENV": "development"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "channel": "preview",
+      "env": {
+        "APP_ENV": "preview",
+        "EXPO_PUBLIC_APP_ENV": "preview"
+      },
+      "android": {
+        "buildType": "apk",
+        "resourceClass": "medium"
+      },
+      "ios": {
+        "resourceClass": "medium"
+      }
+    },
+    "production": {
+      "distribution": "store",
+      "channel": "production",
+      "autoIncrement": true,
+      "env": {
+        "APP_ENV": "production",
+        "EXPO_PUBLIC_APP_ENV": "production"
+      },
+      "android": {
+        "buildType": "app-bundle",
+        "resourceClass": "medium"
+      },
+      "ios": {
+        "resourceClass": "medium"
+      }
+    }
+  }
+}
