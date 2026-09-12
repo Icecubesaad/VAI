@@ -8,13 +8,13 @@
 // push with keep-best. Failed predictions always cost the user 0.
 
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { supabaseUrl } from "./auth.ts";
 import { GEMINI_FLASH_IMAGE, GEMINI_PRO_IMAGE, GEMINI_STD_COST_USD, generateImage } from "./gemini.ts";
 import { FASHN_MAX_COST_USD, FASHN_STD_COST_USD, pollToDone, runTryon } from "./fashn.ts";
 import { HttpError } from "./http.ts";
 import { logRenderCost, todaySpendUsd } from "./ledger.ts";
 import { pushToUser, renderFailedPush, renderReadyPush } from "./push.ts";
 import { refundAllowance, type PoolCode } from "./quota.ts";
+import { signedAssetUrl } from "./storage.ts";
 
 export const MAX_ATTEMPTS = 3;
 const EST_STD_USD = 0.075;
@@ -217,7 +217,13 @@ async function downloadToBytes(url: string): Promise<Uint8Array> {
   return new Uint8Array(await res.arrayBuffer());
 }
 
-async function publicRenderUrl(
+/**
+ * Upload finished render bytes to the private `renders` bucket under the
+ * owner's prefix and return the bucket PATH. Serving mints fresh 1h signed
+ * URLs from this path (signedRenderUrl) — the bucket has no public-read
+ * policy (migration 0008), so nothing here can be listed or fetched anonymously.
+ */
+async function uploadRender(
   sb: SupabaseClient,
   userId: string,
   renderId: string,
@@ -229,62 +235,28 @@ async function publicRenderUrl(
     upsert: true,
   });
   if (error) throw error;
-  const { data } = sb.storage.from("renders").getPublicUrl(path);
-  return data.publicUrl;
+  return path;
 }
 
-async function latestDoneUrl(
+async function latestDoneSignedUrl(
   sb: SupabaseClient,
   userId: string,
   excludeId: string,
 ): Promise<string | null> {
-  const { data } = await sb.from("renders").select("output_url").eq("user_id", userId)
+  const { data } = await sb.from("renders").select("output_path,output_url").eq("user_id", userId)
     .eq("status", "done").neq("id", excludeId).order("created_at", { ascending: false }).limit(1)
-    .maybeSingle<{ output_url: string | null }>();
-  return data?.output_url ?? null;
+    .maybeSingle<{ output_path: string | null; output_url: string | null }>();
+  if (!data) return null;
+  if (data.output_path) return await signedRenderUrl(sb, userId, data.output_path);
+  return data.output_url; // legacy row predating 0008 (already expired-safe: transient push copy)
 }
 
 /**
- * Storage path → 1h signed URL, SSRF-hardened. Users can UPDATE their own
- * `base_photos.url` / `garments.image_url` via the Data API, so a stored
- * value is NEVER fetched as-is:
- *   - bare paths must live under the owner's `<userId>/` prefix (uploads do);
- *   - full URLs are accepted only when they point at THIS project's storage
- *     object endpoint, and are reduced to an owner-prefixed path before
- *     signing — the pipeline can never be pointed at arbitrary or internal
- *     hosts, and never at another user's objects.
+ * Resolve a stored base/garment image reference to a 1h signed URL — SSRF-
+ * and ownership-hardened in _shared/storage.ts (users can update their own
+ * url columns via the Data API; the pipeline never fetches untrusted URLs).
  */
-async function signedUrl(sb: SupabaseClient, bucket: string, path: string, userId: string): Promise<string> {
-  let objectPath = path;
-  if (/^https?:\/\//i.test(path)) {
-    let u: URL;
-    try {
-      u = new URL(path);
-    } catch {
-      throw new Error(`Invalid ${bucket} image URL`);
-    }
-    const projectHost = (() => {
-      try {
-        return new URL(supabaseUrl()).host;
-      } catch {
-        return "";
-      }
-    })();
-    const m = /^\/storage\/v1\/object\/(?:public|authenticated|sign\/[^/]+)?\/([^/]+)\/(.+)$/.exec(
-      u.pathname,
-    );
-    if (!projectHost || u.host !== projectHost || !m || m[1] !== bucket) {
-      throw new Error(`${bucket} image must be a VAI storage object`);
-    }
-    objectPath = decodeURIComponent(m[2]!);
-  }
-  if (!objectPath.startsWith(`${userId}/`)) {
-    throw new Error(`${bucket} image is outside the owner's storage prefix`);
-  }
-  const { data, error } = await sb.storage.from(bucket).createSignedUrl(objectPath, 3600);
-  if (error || !data) throw new Error(`Cannot sign ${bucket}/${objectPath}`);
-  return data.signedUrl;
-}
+const signedUrl = signedAssetUrl;
 
 /**
  * Run ONE provider attempt for a queued/processing render.
@@ -358,8 +330,6 @@ export async function processRender(sb: SupabaseClient, renderId: string): Promi
     const chain = providerChain(tier);
     const cursor = Math.min(meta.provider_cursor ?? 0, chain.length - 1);
     const provider = chain[cursor] as string;
-    const url = supabaseUrl();
-    void url;
 
     const prompt = buildTryonPrompt({
       mode: job.mode as PipelineMode,
@@ -394,13 +364,14 @@ export async function processRender(sb: SupabaseClient, renderId: string): Promi
       bytes = img.bytes;
     }
 
-    const outputUrl = await publicRenderUrl(sb, job.user_id, job.id, bytes);
+    const outputPath = await uploadRender(sb, job.user_id, job.id, bytes);
     const latencyMs = Date.now() - started;
     const costUsd = providerCostUsd(provider);
 
     await sb.from("renders").update({
       status: "done",
-      output_url: outputUrl,
+      output_path: outputPath,
+      output_url: null, // served via signedRenderUrl — never a public URL (0008)
       provider: providerLabel(provider),
       tier,
       garment_refs: { garment_ids: garmentIds, meta },
@@ -464,6 +435,6 @@ async function failTerminal(
     });
     if (error) console.error("[pipeline] refund failed", error.message);
   }
-  const keepBest = await latestDoneUrl(sb, job.user_id, job.id);
+  const keepBest = await latestDoneSignedUrl(sb, job.user_id, job.id);
   await pushToUser(sb, job.user_id, renderFailedPush(keepBest));
 }

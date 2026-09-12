@@ -19,6 +19,7 @@ import { GEMINI_STD_COST_USD } from "./gemini.ts";
 import { badRequest } from "./http.ts";
 import { sha256Hex } from "./idempotency.ts";
 import { renderCostUsd } from "./ledger.ts";
+import { signedRenderUrl } from "./storage.ts";
 
 export type ReelPose = "front" | "step" | "detail";
 export type ReelTier = "teaser" | "full";
@@ -47,6 +48,9 @@ export interface ReelRenderRow {
   id: string;
   outfit_id: string | null;
   output_url: string | null;
+  /** Private-bucket path (0008) — minted into a 1h signed URL per response. */
+  output_path: string | null;
+  user_id: string;
   status: string;
   created_at: string;
   garment_refs: { garment_ids?: string[]; meta?: Record<string, unknown> } | null;
@@ -148,11 +152,16 @@ export async function toReelCard(
   }
   const done = row.status === "done";
   const cost = done ? (await renderCostUsd(sb, row.id)) ?? REEL_EST_COST_USD : REEL_EST_COST_USD;
+  // Fresh 1h signed URL per response (0008) — cached clients self-heal on
+  // their next refresh. Legacy rows (pre-0008) fall back to the stored URL.
+  const imageUrl = (row.output_path
+    ? await signedRenderUrl(sb, row.user_id, row.output_path)
+    : row.output_url) ?? "";
   const card: ReelCard = {
     id: opts?.cardId ?? row.id,
     outfitId: row.outfit_id ?? "",
     renderId: row.id,
-    imageUrl: row.output_url ?? "",
+    imageUrl,
     pose: metaPose(meta) ?? opts?.poseFallback ?? "front",
     garmentIds,
     whyLine,
@@ -192,7 +201,7 @@ export async function readWeeklyDrop(
     : [];
   if (ids.length === 0) return { weekOf: drop.week_of, cards: [], tier };
   const { data: rows, error: rErr } = await sb.from("renders")
-    .select("id,outfit_id,output_url,status,created_at,garment_refs")
+    .select("id,user_id,outfit_id,output_url,output_path,status,created_at,garment_refs")
     .eq("user_id", userId).in("id", ids);
   if (rErr) throw rErr;
   const byId = new Map<string, ReelRenderRow>();

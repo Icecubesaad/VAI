@@ -9,6 +9,8 @@ export interface RenderRow {
   user_id: string;
   status: "queued" | "processing" | "done" | "failed";
   output_url: string | null;
+  /** Private-bucket path (0008) — served via signedRenderUrl, never public. */
+  output_path: string | null;
   provider: string | null;
   mode: string | null;
   tier: string | null;
@@ -54,7 +56,7 @@ export async function findRenderByKey(
   key: string,
 ): Promise<RenderRow | null> {
   const { data, error } = await sb.from("renders").select(
-    "id,user_id,status,output_url,provider,mode,tier,idempotency_key,attempts,created_at",
+    "id,user_id,status,output_url,output_path,provider,mode,tier,idempotency_key,attempts,created_at",
   ).eq("user_id", userId).eq("idempotency_key", key).maybeSingle<RenderRow>();
   if (error) throw error;
   return data;

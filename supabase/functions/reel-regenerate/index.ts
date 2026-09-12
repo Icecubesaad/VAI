@@ -76,7 +76,7 @@ Deno.serve(async (req) => {
 
     const sb = admin();
     const { data: parent } = await sb.from("renders")
-      .select("id,outfit_id,output_url,status,created_at,garment_refs")
+      .select("id,user_id,outfit_id,output_url,output_path,status,created_at,garment_refs")
       .eq("id", cardId).eq("user_id", user.id)
       .maybeSingle<ReelRenderRow>();
     if (!parent) throw badRequest("card_not_found", "Card not found");
@@ -102,7 +102,7 @@ Deno.serve(async (req) => {
     });
 
     const { data: fresh, error: fErr } = await sb.from("renders")
-      .select("id,outfit_id,output_url,status,created_at,garment_refs")
+      .select("id,user_id,outfit_id,output_url,output_path,status,created_at,garment_refs")
       .eq("id", outcome.render_id).eq("user_id", user.id)
       .single<ReelRenderRow>();
     if (fErr || !fresh) throw fErr ?? new Error("Regenerated render not visible");

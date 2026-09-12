@@ -55,6 +55,7 @@ import {
 import { parsePoseMode, resolvePoseRef } from "../_shared/pinterest.ts";
 import { consumeAllowance, getEntitlementState, refundAllowance, todayISO, type PoolCode } from "../_shared/quota.ts";
 import { requestRestyle } from "../_shared/restyle.ts";
+import { signedRenderUrl } from "../_shared/storage.ts";
 
 type LooseBody = Record<string, unknown>;
 
@@ -243,7 +244,12 @@ async function statusPayload(
     cached: false,
   };
   if (row.provider) out.model = row.provider;
-  if (row.output_url) out.output_url = row.output_url;
+  // output_url is minted fresh per response (1h signed URL, 0008) — the DB
+  // stores only the private bucket path.
+  const outputUrl = row.output_path
+    ? await signedRenderUrl(sb, row.user_id, row.output_path)
+    : row.output_url; // legacy row predating 0008
+  if (outputUrl) out.output_url = outputUrl;
   if (row.status === "done") {
     const cost = await renderCostUsd(sb, row.id);
     if (cost !== null) out.cost_usd = cost;
@@ -302,7 +308,21 @@ Deno.serve(async (req) => {
         }
       }
       const { data: done } = await sb.from("renders")
-        .select("id,status,output_url,error").eq("id", rid).single();
+        .select("id,user_id,status,output_url,output_path,error").eq("id", rid).single<{
+          id: string;
+          user_id: string;
+          status: string;
+          output_url: string | null;
+          output_path: string | null;
+          error: string | null;
+        }>();
+      if (done) {
+        done.output_url = done.output_path
+          ? await signedRenderUrl(sb, done.user_id, done.output_path)
+          : done.output_url;
+        delete (done as Record<string, unknown>).output_path;
+        delete (done as Record<string, unknown>).user_id;
+      }
       return json(done);
     }
 
@@ -318,7 +338,7 @@ Deno.serve(async (req) => {
       const rid = firstStr(body.render_id, body.renderId);
       if (!rid) throw badRequest("render_required", "render_id required");
       const { data: row } = await sb.from("renders").select(
-        "id,user_id,status,output_url,provider,mode,tier,idempotency_key,attempts,created_at",
+        "id,user_id,status,output_url,output_path,provider,mode,tier,idempotency_key,attempts,created_at",
       ).eq("id", rid).eq("user_id", user.id).maybeSingle<RenderRow>();
       if (!row) throw badRequest("render_not_found", "Render not found");
       return json(await statusPayload(sb, row));

@@ -19,6 +19,7 @@ import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0
 import { badRequest, forbidden, paymentRequired } from "./http.ts";
 import { buildRenderKey, findRenderByKey, isReusableRow } from "./idempotency.ts";
 import { enqueueRender, type PipelineTier } from "./pipeline.ts";
+import { signedRenderUrl } from "./storage.ts";
 import {
   bumpRestyleDaily,
   checkRestyleWeeklyCap,
@@ -72,6 +73,7 @@ interface ParentRow {
   tier: string | null;
   status: string;
   output_url: string | null;
+  output_path: string | null;
   error: string | null;
 }
 
@@ -79,6 +81,12 @@ function extractFailTags(errorText: string | null): string[] {
   if (!errorText) return [];
   const stop = new Set(["the", "and", "with", "from", "that", "this", "failed", "attempt", "error"]);
   return errorText.toLowerCase().split(/[^a-z]+/).filter((w) => w.length > 4 && !stop.has(w)).slice(0, 5);
+}
+
+/** Fresh 1h signed URL for the parent's output (path-first, legacy fallback). */
+async function keepBestUrlFor(sb: SupabaseClient, parent: ParentRow): Promise<string | null> {
+  if (parent.output_path) return await signedRenderUrl(sb, parent.user_id, parent.output_path);
+  return parent.output_url;
 }
 
 export async function requestRestyle(
@@ -91,7 +99,7 @@ export async function requestRestyle(
   if (!note) throw badRequest("note_required", "Describe the change (e.g. “tuck it in, warmer light”)");
 
   const { data: parent, error } = await sb.from("renders").select(
-    "id,user_id,outfit_id,base_photo_id,parent_render_id,garment_refs,mode,tier,status,output_url,error",
+    "id,user_id,outfit_id,base_photo_id,parent_render_id,garment_refs,mode,tier,status,output_url,output_path,error",
   ).eq("id", input.renderId).eq("user_id", userId).maybeSingle<ParentRow>();
   if (error || !parent) throw badRequest("render_not_found", "Render not found");
   if (parent.status !== "done") {
@@ -116,13 +124,16 @@ export async function requestRestyle(
   const restyleN = depth + 1;
   if (restyleN > RESTYLE_MAX_PER_SESSION) {
     // Keep-best: latest done render in this session chain.
-    const { data: best } = await sb.from("renders").select("id,output_url")
+    const { data: best } = await sb.from("renders").select("id,output_url,output_path")
       .eq("user_id", userId).eq("status", "done")
       .order("created_at", { ascending: false }).limit(1)
-      .maybeSingle<{ id: string; output_url: string | null }>();
+      .maybeSingle<{ id: string; output_url: string | null; output_path: string | null }>();
+    const keepBestUrl = best?.output_path
+      ? await signedRenderUrl(sb, userId, best.output_path)
+      : best?.output_url ?? parent.output_url;
     throw forbidden("restyle_session_cap",
       "3 restyles per session — kept your best version. Start a new try-on to explore further.",
-      { keep_best_url: best?.output_url ?? parent.output_url, keep_best_id: best?.id ?? parent.id });
+      { keep_best_url: keepBestUrl, keep_best_id: best?.id ?? parent.id });
   }
 
   // Cost: 1 credit, always. Free tier also burns its 1/day slot — but ONLY
@@ -150,7 +161,7 @@ export async function requestRestyle(
       render_id: existing.id,
       status: existing.status,
       cached: true,
-      keep_best_url: parent.output_url,
+      keep_best_url: await keepBestUrlFor(sb, parent),
       rewritten_prompt: input.rewrittenPrompt ?? undefined,
       report: null,
       idempotency_key: key,
@@ -236,7 +247,7 @@ export async function requestRestyle(
         render_id: winner.id,
         status: winner.status,
         cached: true,
-        keep_best_url: parent.output_url,
+        keep_best_url: await keepBestUrlFor(sb, parent),
         rewritten_prompt: input.rewrittenPrompt ?? undefined,
         report: null,
         idempotency_key: key,
@@ -251,7 +262,7 @@ export async function requestRestyle(
     cached: false,
     restyle_n: restyleN,
     restyles_left_session: RESTYLE_MAX_PER_SESSION - restyleN,
-    keep_best_url: parent.output_url,
+    keep_best_url: await keepBestUrlFor(sb, parent),
     rewritten_prompt: input.rewrittenPrompt ?? undefined,
     report: restyleN >= 2
       ? "If this attempt fails, the pipeline retries once with a simplified prompt and keeps your best version."

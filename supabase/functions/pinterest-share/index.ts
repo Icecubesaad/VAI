@@ -5,7 +5,7 @@
 // EXPLICIT-TAP ONLY: this function is called from the share sheet after the
 // user picks a board and confirms — NEVER from any cron, queue, or automatic
 // flow (no auto-post anywhere; grep must show zero internal callers).
-// Guards (all fail closed): render must be owned + done + have output_url;
+// Guards (all fail closed): render must be owned + done + servable (signed
 // the account must hold pins:write (else 403 share_not_authorized → client
 // re-runs pinterest-auth ?action=auth-url&with_write=1); the board is
 // re-verified owned via GET /v5/boards/{id} (1 budgeted request).
@@ -15,6 +15,7 @@
 import { admin, requireUser } from "../_shared/auth.ts";
 import { badRequest, forbidden, handleOptions, json, readJson, requireMethod, toErrorResponse } from "../_shared/http.ts";
 import { getValidToken, loadAccount, pinApi } from "../_shared/pinterest.ts";
+import { signedRenderUrl } from "../_shared/storage.ts";
 
 const TITLE_MAX = 100;
 const DESC_MAX = 800;
@@ -36,11 +37,16 @@ Deno.serve(async (req) => {
       .find((v): v is string => typeof v === "string" && v.length > 0);
     if (!boardId) throw badRequest("board_required", "boardId required");
 
-    const { data: render } = await sb.from("renders").select("id,status,output_url")
+    const { data: render } = await sb.from("renders").select("id,user_id,status,output_url,output_path")
       .eq("id", renderId).eq("user_id", user.id)
-      .maybeSingle<{ id: string; status: string; output_url: string | null }>();
+      .maybeSingle<{ id: string; user_id: string; status: string; output_url: string | null; output_path: string | null }>();
     if (!render) throw badRequest("render_not_found", "Render not found");
-    if (render.status !== "done" || !render.output_url) {
+    // Fresh 1h signed URL (0008) — Pinterest's fetcher needs a publicly
+    // reachable image; the private-bucket path alone won't do.
+    const pinImageUrl = render.output_path
+      ? await signedRenderUrl(sb, render.user_id, render.output_path)
+      : render.output_url;
+    if (render.status !== "done" || !pinImageUrl) {
       throw badRequest("render_not_ready", "Only a finished try-on can be shared");
     }
 
@@ -76,7 +82,7 @@ Deno.serve(async (req) => {
         title,
         description,
         ...(altText ? { alt_text: altText } : {}),
-        media_source: { source_type: "image_url", url: render.output_url },
+        media_source: { source_type: "image_url", url: pinImageUrl },
       },
     })) as { id?: string };
 
