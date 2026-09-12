@@ -60,7 +60,7 @@ Deno.serve(async (req) => {
     }
 
     const sb = admin();
-    const [ent, quotaRow, closet, sub] = await Promise.all([
+    const [ent, quotaRow, closet, sub, userRow] = await Promise.all([
       getEntitlementState(sb, user.id),
       sb.from("render_quotas").select("restyles").eq("user_id", user.id).eq("day", todayISO())
         .maybeSingle<{ restyles: number }>(),
@@ -68,6 +68,8 @@ Deno.serve(async (req) => {
         .eq("user_id", user.id).is("deleted_at", null),
       sb.from("subscriptions").select("status,trial_ends_at,renews_at").eq("user_id", user.id)
         .maybeSingle<{ status: string | null; trial_ends_at: string | null; renews_at: string | null }>(),
+      sb.from("users").select("referral_code").eq("id", user.id)
+        .maybeSingle<{ referral_code: string | null }>(),
     ]);
 
     const closetUsed = closet.count ?? 0;
@@ -95,6 +97,8 @@ Deno.serve(async (req) => {
       hdCredits: ent.hdCredits,
       canUseMax: ent.canUseMax,
       hardBlocked: ent.tier === "free" && ent.rendersLeft === 0 && ent.stdCredits === 0,
+      // Server-minted share code (users row) — the client watermark uses it.
+      referralCode: userRow?.referral_code ?? null,
     });
   } catch (e) {
     return toErrorResponse(e);

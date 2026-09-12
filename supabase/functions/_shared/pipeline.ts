@@ -11,9 +11,10 @@ import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0
 import { supabaseUrl } from "./auth.ts";
 import { GEMINI_FLASH_IMAGE, GEMINI_PRO_IMAGE, GEMINI_STD_COST_USD, generateImage } from "./gemini.ts";
 import { FASHN_MAX_COST_USD, FASHN_STD_COST_USD, pollToDone, runTryon } from "./fashn.ts";
+import { HttpError } from "./http.ts";
 import { logRenderCost, todaySpendUsd } from "./ledger.ts";
 import { pushToUser, renderFailedPush, renderReadyPush } from "./push.ts";
-import type { PoolCode } from "./quota.ts";
+import { refundAllowance, type PoolCode } from "./quota.ts";
 
 export const MAX_ATTEMPTS = 3;
 const EST_STD_USD = 0.075;
@@ -114,10 +115,21 @@ export async function enqueueRender(
   try {
     await fireRenderRequested(data.id, input.userId);
   } catch (e) {
-    // Client retries with the same idempotency key and gets this same row.
-    await sb.from("renders").update({ error: `event_failed: ${(e as Error).message}` })
-      .eq("id", data.id);
-    throw new Error(`Render queued locally but Inngest unreachable: ${(e as Error).message}`);
+    // P1-7: never leave a reusable `queued` row nothing will ever process —
+    // the client would cache-hit it forever and the allowance would be gone.
+    // Refund the allowance and remove the row so a retry starts clean.
+    console.error("[pipeline] Inngest enqueue failed — refunding", {
+      renderId: data.id,
+      userId: input.userId,
+      error: (e as Error).message,
+    });
+    await refundAllowance(sb, input.userId, input.pool);
+    await sb.from("renders").delete().eq("id", data.id);
+    throw new HttpError(
+      503,
+      "render_queue_unavailable",
+      "The render queue is momentarily unreachable — try again in a moment.",
+    );
   }
   return data;
 }
@@ -232,11 +244,45 @@ async function latestDoneUrl(
   return data?.output_url ?? null;
 }
 
-async function signedUrl(sb: SupabaseClient, bucket: string, path: string): Promise<string> {
-  // Paths stored are already full URLs (public buckets) or storage paths (private).
-  if (/^https?:\/\//i.test(path)) return path;
-  const { data, error } = await sb.storage.from(bucket).createSignedUrl(path, 3600);
-  if (error || !data) throw new Error(`Cannot sign ${bucket}/${path}`);
+/**
+ * Storage path → 1h signed URL, SSRF-hardened. Users can UPDATE their own
+ * `base_photos.url` / `garments.image_url` via the Data API, so a stored
+ * value is NEVER fetched as-is:
+ *   - bare paths must live under the owner's `<userId>/` prefix (uploads do);
+ *   - full URLs are accepted only when they point at THIS project's storage
+ *     object endpoint, and are reduced to an owner-prefixed path before
+ *     signing — the pipeline can never be pointed at arbitrary or internal
+ *     hosts, and never at another user's objects.
+ */
+async function signedUrl(sb: SupabaseClient, bucket: string, path: string, userId: string): Promise<string> {
+  let objectPath = path;
+  if (/^https?:\/\//i.test(path)) {
+    let u: URL;
+    try {
+      u = new URL(path);
+    } catch {
+      throw new Error(`Invalid ${bucket} image URL`);
+    }
+    const projectHost = (() => {
+      try {
+        return new URL(supabaseUrl()).host;
+      } catch {
+        return "";
+      }
+    })();
+    const m = /^\/storage\/v1\/object\/(?:public|authenticated|sign\/[^/]+)?\/([^/]+)\/(.+)$/.exec(
+      u.pathname,
+    );
+    if (!projectHost || u.host !== projectHost || !m || m[1] !== bucket) {
+      throw new Error(`${bucket} image must be a VAI storage object`);
+    }
+    objectPath = decodeURIComponent(m[2]!);
+  }
+  if (!objectPath.startsWith(`${userId}/`)) {
+    throw new Error(`${bucket} image is outside the owner's storage prefix`);
+  }
+  const { data, error } = await sb.storage.from(bucket).createSignedUrl(objectPath, 3600);
+  if (error || !data) throw new Error(`Cannot sign ${bucket}/${objectPath}`);
   return data.signedUrl;
 }
 
@@ -329,9 +375,9 @@ export async function processRender(sb: SupabaseClient, renderId: string): Promi
     let bytes: Uint8Array;
     if (provider === "fashn-std" || provider === "fashn-max") {
       const run = await runTryon({
-        modelImageUrl: await signedUrl(sb, "base", base.url),
+        modelImageUrl: await signedUrl(sb, "base", base.url, job.user_id),
         garmentImageUrls: await Promise.all(
-          garmentUrls.map((u) => signedUrl(sb, "garments", u)),
+          garmentUrls.map((u) => signedUrl(sb, "garments", u, job.user_id)),
         ),
         max: provider === "fashn-max",
       });
@@ -342,8 +388,8 @@ export async function processRender(sb: SupabaseClient, renderId: string): Promi
       const img = await generateImage({
         model: provider,
         prompt,
-        refImageUrls: [await signedUrl(sb, "base", base.url),
-          ...await Promise.all(garmentUrls.map((u) => signedUrl(sb, "garments", u)))],
+        refImageUrls: [await signedUrl(sb, "base", base.url, job.user_id),
+          ...await Promise.all(garmentUrls.map((u) => signedUrl(sb, "garments", u, job.user_id)))],
       });
       bytes = img.bytes;
     }

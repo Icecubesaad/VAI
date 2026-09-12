@@ -21,7 +21,8 @@ Deno.serve(async (req) => {
     const invitee = await requireUser(req);
     const body = await readJson<{ code?: string }>(req);
     const code = (body.code ?? "").trim().toUpperCase();
-    if (!/^VAI-[A-Z0-9]{6}$/.test(code)) throw badRequest("code_invalid", "That code doesn't look right");
+    // {4,6}: 6-char codes are minted since 0007; legacy 4-char codes stay valid.
+    if (!/^VAI-[A-Z0-9]{4,6}$/.test(code)) throw badRequest("code_invalid", "That code doesn't look right");
 
     const sb = admin();
     const { data: inviter } = await sb.from("users").select("id").eq("referral_code", code)
@@ -29,19 +30,24 @@ Deno.serve(async (req) => {
     if (!inviter) throw badRequest("code_unknown", "No account matches that code");
     if (inviter.id === invitee.id) throw badRequest("self_referral", "You can't refer yourself");
 
-    // Idempotent: already linked → report current state, never double-link.
+    // Already linked → never double-link, but re-run qualification: an invitee
+    // who linked before finishing onboarding (3 items + 1 try-on) used to be
+    // stuck `pending` forever. Credited/denied statuses still short-circuit.
     const { data: link } = await sb.from("referrals").select("status").eq("invitee_id", invitee.id)
       .maybeSingle<{ status: string }>();
-    if (link) return json({ status: link.status, already_linked: true });
-
-    const { error: linkErr } = await sb.from("referrals").insert({
-      code,
-      inviter_id: inviter.id,
-      invitee_id: invitee.id,
-      status: "pending",
-    });
-    // Concurrent double-tap → unique violation on invitee_id; treat as linked.
-    if (linkErr && linkErr.code !== "23505") throw linkErr;
+    if (link && link.status !== "pending") {
+      return json({ status: link.status, already_linked: true });
+    }
+    if (!link) {
+      const { error: linkErr } = await sb.from("referrals").insert({
+        code,
+        inviter_id: inviter.id,
+        invitee_id: invitee.id,
+        status: "pending",
+      });
+      // Concurrent double-tap → unique violation on invitee_id; treat as linked.
+      if (linkErr && linkErr.code !== "23505") throw linkErr;
+    }
 
     // Qualification proof.
     const [{ count: items }, { count: tryons }] = await Promise.all([

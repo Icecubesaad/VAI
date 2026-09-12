@@ -7,16 +7,17 @@
 // Ledger memos are amount_cents=0 BY DESIGN: multi-currency IAP receipts are
 // audit memos, not revenue postings (revenue truth lives in the provider
 // dashboards + these memos). Credit-pack fulfillment (Stripe) increments
-// `entitlements` std/hd credits + a pack memo via logPackPurchase.
-// Dedupe: every handler checks ledger meta->>'provider_event_id' first, so
-// provider retries (RC/Apple/Google redeliver aggressively) are idempotent.
+// `entitlements` std/hd credits via the atomic grant_pack_credits RPC (0007).
+// Dedupe: provider event ids are claimed through the ledger's UNIQUE
+// (type, meta->>'provider_event_id') index — exactly-once at the DB level.
 // System of record is RevenueCat; Apple/Google-direct are the fallback/audit
 // path (secrets.md). Handlers never throw raw secrets — failures return
-// bad_signature / not_configured codes without key material.
+// bad_signature / not_configured codes without key material. Signature
+// verification lives in _shared/jws.ts (Apple x5c chain / Google OIDC JWKS).
 
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { HttpError } from "./http.ts";
-import { logPackPurchase, writeLedger } from "./ledger.ts";
+import { writeLedger } from "./ledger.ts";
 
 export type SubStatus = "trialing" | "active" | "past_due" | "canceled" | "expired";
 export type BillingPlatform = "ios" | "android" | "stripe";
@@ -58,13 +59,10 @@ export function base64UrlDecode(segment: string): string {
   return atob(padded);
 }
 
-/** Decode a JWS payload (compact serialization). Structural decode only —
- *  cryptographic chain verification is documented per-handler. */
-export function decodeJwsPayload<T>(jws: string): T {
-  const parts = jws.split(".");
-  if (parts.length !== 3) throw new Error("malformed JWS");
-  return JSON.parse(base64UrlDecode(parts[1])) as T;
-}
+// NOTE: there is deliberately no decode-only JWS helper here. Payloads are
+// trusted only after cryptographic verification (_shared/jws.ts) — a
+// structural decode that skips the signature is how billing-apple used to
+// grant premium to forged webhooks.
 
 export interface SubscriptionUpsert {
   userId: string;
@@ -152,46 +150,46 @@ export async function grantPackCredits(
 ): Promise<{ deduped: boolean; std: number; hd: number }> {
   const spec = PACKS[opts.pack];
   if (!spec) throw new HttpError(400, "pack_unknown", `Unknown credit pack: ${opts.pack}`);
+
+  // Atomic claim + grant inside grant_pack_credits (migration 0007): the
+  // provider_event_id ledger claim is the concurrency boundary, so two
+  // concurrent deliveries of the same event can never both credit. The
+  // pre-check here is only a fast path for the common retry case.
   if (await alreadyApplied(sb, opts.eventId)) return { deduped: true, std: spec.std, hd: spec.hd };
 
-  const { data: ent } = await sb.from("entitlements")
-    .select("std_credits,hd_credits").eq("user_id", opts.userId)
-    .maybeSingle<{ std_credits: number; hd_credits: number }>();
-  if (!ent) {
-    const { error } = await sb.from("entitlements").insert({
-      user_id: opts.userId,
-      std_credits: spec.std,
-      hd_credits: spec.hd,
-    });
-    if (error) throw error;
-  } else {
-    const { error } = await sb.from("entitlements").update({
-      std_credits: ent.std_credits + spec.std,
-      hd_credits: ent.hd_credits + spec.hd,
-    }).eq("user_id", opts.userId);
-    if (error) throw error;
-  }
+  const { data, error } = await sb.rpc("grant_pack_credits", {
+    p_user_id: opts.userId,
+    p_pack: opts.pack,
+    p_event_id: opts.eventId,
+    p_amount_cents: opts.amountCents ?? null,
+  }).single<{ deduped: boolean; std: number; hd: number }>();
+  if (error) throw error;
+  return {
+    deduped: data?.deduped === true,
+    std: typeof data?.std === "number" ? data.std : spec.std,
+    hd: typeof data?.hd === "number" ? data.hd : spec.hd,
+  };
+}
 
-  await logPackPurchase(sb, opts.userId, {
-    pack: opts.pack,
-    std: spec.std,
-    hd: spec.hd,
-    platform: opts.provider,
-  });
-  // Attach the provider event id to the pack memo for retry dedupe.
-  await writeLedger(sb, {
-    userId: opts.userId,
-    type: "sub",
-    amountCents: 0,
-    meta: {
-      kind: "pack",
-      provider: opts.provider,
-      provider_event_id: opts.eventId,
-      product_id: opts.productId ?? opts.pack,
-      amount_cents: opts.amountCents ?? null,
-    },
-  });
-  return { deduped: false, std: spec.std, hd: spec.hd };
+/**
+ * Atomic refund debit for a credit pack (migration 0007): claims the refund
+ * event id in the ledger, then floors std/hd credits at 0. Returns false when
+ * this refund was already applied (retry-safe) or the pack is unknown.
+ */
+export async function debitPackCreditsForRefund(
+  sb: SupabaseClient,
+  opts: { userId: string; pack: string; eventId: string },
+): Promise<{ debited: boolean; std: number; hd: number }> {
+  const spec = PACKS[opts.pack];
+  if (!spec) return { debited: false, std: 0, hd: 0 };
+  const { data, error } = await sb.rpc("debit_pack_credits", {
+    p_user_id: opts.userId,
+    p_std: spec.std,
+    p_hd: spec.hd,
+    p_event_id: opts.eventId,
+  }).single<boolean>();
+  if (error) throw error;
+  return { debited: data === true, std: spec.std, hd: spec.hd };
 }
 
 /** Confirm the user exists before writing money rows (webhooks carry raw ids). */

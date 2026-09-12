@@ -1,10 +1,11 @@
 // billing-google — Play RTDN via Pub/Sub push (fallback / audit path).
 // POST /functions/v1/billing-google  (no JWT — Google-signed instead)
-// Verify (secrets.md verify column):
-//   1. Pub/Sub OIDC JWT in `Authorization: Bearer` — iss must be a Google
-//      accounts issuer, exp in the future, and (when GOOGLE_PUBSUB_SERVICE_ACCOUNT
-//      is configured) the email claim must equal it. Unconfigured → loud warn
-//      + continue (operator must set it; see supabase/secrets.md).
+// Verify (_shared/jws.ts, fail closed):
+//   1. Pub/Sub OIDC JWT in `Authorization: Bearer` — FULL verification: RS256
+//      signature against Google's published JWKS, iss = accounts.google.com,
+//      exp in the future, and the email claim MUST equal
+//      GOOGLE_PUBSUB_SERVICE_ACCOUNT. The env var is REQUIRED (unset → 500
+//      not_configured; the endpoint never runs unauthenticated).
 //   2. message.data (base64) → { packageName, subscriptionNotification? } —
 //      packageName must equal ANDROID_PACKAGE_NAME when configured.
 // notificationType → sub_status: 1 RECOVERED/2 RENEWED/4 PURCHASED/7 RESTARTED/
@@ -21,19 +22,14 @@
 import { admin } from "../_shared/auth.ts";
 import {
   base64UrlDecode,
-  decodeJwsPayload,
   isUuid,
+  notConfigured,
   requireUserExists,
   upsertSubscription,
   type SubStatus,
 } from "../_shared/billing.ts";
-import { handleOptions, json, requireMethod, toErrorResponse } from "../_shared/http.ts";
-
-interface OidcClaims {
-  iss?: string;
-  email?: string;
-  exp?: number;
-}
+import { verifyGoogleOidcToken, type OidcClaims } from "../_shared/jws.ts";
+import { handleOptions, HttpError, json, requireMethod, toErrorResponse } from "../_shared/http.ts";
 
 interface RtdnEnvelope {
   version?: string;
@@ -49,34 +45,21 @@ interface RtdnEnvelope {
   testNotification?: unknown;
 }
 
-async function verifyPubSubOidc(req: Request): Promise<void> {
+async function verifyPubSubOidc(req: Request): Promise<OidcClaims> {
+  const expectedEmail = Deno.env.get("GOOGLE_PUBSUB_SERVICE_ACCOUNT");
+  if (!expectedEmail) {
+    // Fail closed: an unauthenticated push endpoint must never run. Operators
+    // must set GOOGLE_PUBSUB_SERVICE_ACCOUNT (supabase/secrets.md).
+    throw notConfigured("GOOGLE_PUBSUB_SERVICE_ACCOUNT");
+  }
   const header = req.headers.get("authorization") ?? "";
   const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
-  const expectedEmail = Deno.env.get("GOOGLE_PUBSUB_SERVICE_ACCOUNT");
-  if (!token) {
-    if (expectedEmail) {
-      throw new Error("missing OIDC bearer (Pub/Sub push auth)");
-    }
-    console.warn("[billing-google] no OIDC bearer and GOOGLE_PUBSUB_SERVICE_ACCOUNT unset — auth skipped (set it per supabase/secrets.md)");
-    return;
-  }
-  let claims: OidcClaims;
-  try {
-    claims = decodeJwsPayload<OidcClaims>(token);
-  } catch {
-    throw new Error("malformed OIDC JWT");
-  }
-  const issOk = claims.iss === "accounts.google.com" || claims.iss === "https://accounts.google.com";
-  if (!issOk) throw new Error("OIDC issuer not Google");
-  if (typeof claims.exp === "number" && claims.exp * 1000 < Date.now()) {
-    throw new Error("OIDC token expired");
-  }
-  if (expectedEmail && claims.email !== expectedEmail) {
+  if (!token) throw new Error("missing OIDC bearer (Pub/Sub push auth)");
+  const claims = await verifyGoogleOidcToken(token);
+  if (claims.email !== expectedEmail) {
     throw new Error("OIDC service-account email mismatch");
   }
-  if (!expectedEmail) {
-    console.warn("[billing-google] GOOGLE_PUBSUB_SERVICE_ACCOUNT unset — email claim not enforced (set it per supabase/secrets.md)");
-  }
+  return claims;
 }
 
 interface ServiceAccountJson {
@@ -141,6 +124,9 @@ Deno.serve(async (req) => {
     try {
       await verifyPubSubOidc(req);
     } catch (e) {
+      // HttpError (not_configured) propagates with its own status/code; every
+      // other failure is an auth rejection.
+      if (e instanceof HttpError) throw e;
       console.error("[billing-google] OIDC verify failed", (e as Error).message);
       return json({ ok: false, error: { code: "bad_signature", message: "Invalid Pub/Sub push auth" } }, 401);
     }

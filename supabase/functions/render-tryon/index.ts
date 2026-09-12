@@ -42,8 +42,8 @@
 // Tiers: std default everywhere incl. free. max = HD packs only (402
 // hd_requires_pack otherwise). compare = ONE Max render, tiled single image.
 
-import { admin, requireUser } from "../_shared/auth.ts";
-import { badRequest, getIdempotencyKey, handleOptions, json, paymentRequired, readJson, requireMethod, toErrorResponse } from "../_shared/http.ts";
+import { admin, requireUser, supabaseUrl } from "../_shared/auth.ts";
+import { badRequest, getIdempotencyKey, handleOptions, HttpError, json, paymentRequired, readJson, requireMethod, toErrorResponse } from "../_shared/http.ts";
 import { buildRenderKey, findRenderByKey, isReusableRow, type RenderRow } from "../_shared/idempotency.ts";
 import { renderCostUsd } from "../_shared/ledger.ts";
 import {
@@ -53,7 +53,7 @@ import {
   type PipelineTier,
 } from "../_shared/pipeline.ts";
 import { parsePoseMode, resolvePoseRef } from "../_shared/pinterest.ts";
-import { consumeAllowance, getEntitlementState, todayISO, type PoolCode } from "../_shared/quota.ts";
+import { consumeAllowance, getEntitlementState, refundAllowance, todayISO, type PoolCode } from "../_shared/quota.ts";
 import { requestRestyle } from "../_shared/restyle.ts";
 
 type LooseBody = Record<string, unknown>;
@@ -144,14 +144,14 @@ async function resolveGarmentIds(
   return { outfitId: null, garmentIds: unique };
 }
 
-const INGEST_TIMEOUT_MS = 15_000;
 const INGEST_MAX_BYTES = 8 * 1024 * 1024;
 
 /**
- * base_photo_url without an ID: fetch the bytes server-side, store under the
- * caller's private `base/` prefix, and register a base_photos row so the
- * pipeline keeps its ownership + signed-URL invariants. Becomes the active
- * base only when the user has none.
+ * base_photo_url without an ID: accepts ONLY this project's own private
+ * `base` bucket URLs (SSRF guard — the edge must never become a fetch proxy
+ * for arbitrary or internal hosts). The bytes are already durable in storage,
+ * so this verifies existence/size and registers the base_photos row under
+ * the caller's own prefix. Becomes the active base only when the user has none.
  */
 async function ingestBasePhotoUrl(
   sb: ReturnType<typeof admin>,
@@ -164,47 +164,48 @@ async function ingestBasePhotoUrl(
   } catch {
     throw badRequest("base_url_invalid", "base_photo_url is not a valid URL");
   }
-  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-    throw badRequest("base_url_invalid", "base_photo_url must be http(s)");
+  if (parsed.protocol !== "https:") {
+    throw badRequest("base_url_invalid", "base_photo_url must be https");
   }
+  const projectHost = (() => {
+    try {
+      return new URL(supabaseUrl()).host;
+    } catch {
+      return "";
+    }
+  })();
+  const m = /^\/storage\/v1\/object\/(?:authenticated\/|sign\/[^/]+\/)?base\/(.+)$/.exec(
+    parsed.pathname,
+  );
+  if (!projectHost || parsed.host !== projectHost || !m) {
+    throw badRequest("base_url_invalid", "base_photo_url must be a VAI storage URL");
+  }
+  const objectPath = decodeURIComponent(m[1]!);
+  if (!objectPath.startsWith(`${userId}/`)) {
+    throw badRequest("base_url_forbidden", "base_photo_url must live under your own storage prefix");
+  }
+
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), INGEST_TIMEOUT_MS);
-  let bytes: Uint8Array;
-  let ext = "jpg";
   try {
-    const res = await fetch(url, { signal: ctrl.signal });
-    if (!res.ok) throw badRequest("base_url_unfetchable", `Could not fetch base photo (HTTP ${res.status})`);
-    const len = Number(res.headers.get("content-length") ?? "0");
-    if (len > INGEST_MAX_BYTES) throw badRequest("base_url_too_large", "Base photo exceeds 8MB");
-    const ct = (res.headers.get("content-type") ?? "").toLowerCase();
-    if (ct && !ct.startsWith("image/")) throw badRequest("base_url_invalid", "base_photo_url must point at an image");
-    if (ct.includes("png")) ext = "png";
-    else if (ct.includes("webp")) ext = "webp";
-    else if (ct.includes("heic") || ct.includes("heif")) ext = "heic";
-    const buf = new Uint8Array(await res.arrayBuffer());
-    if (buf.byteLength > INGEST_MAX_BYTES) throw badRequest("base_url_too_large", "Base photo exceeds 8MB");
-    bytes = buf;
+    const { data: blob, error: dlErr } = await sb.storage.from("base").download(objectPath);
+    if (dlErr || !blob) throw badRequest("base_url_unfetchable", "base_photo_url does not resolve to a stored photo");
+    if (blob.size > INGEST_MAX_BYTES) throw badRequest("base_url_too_large", "Base photo exceeds 8MB");
   } catch (e) {
+    if (e instanceof HttpError) throw e;
     if (e instanceof Error && e.name === "AbortError") {
-      throw badRequest("base_url_unfetchable", "Base photo fetch timed out");
+      throw badRequest("base_url_unfetchable", "Base photo check timed out");
     }
-    throw e;
+    throw badRequest("base_url_unfetchable", "base_photo_url does not resolve to a stored photo");
   } finally {
     clearTimeout(timer);
   }
-
-  const path = `${userId}/ingested-${Date.now()}.${ext}`;
-  const { error: upErr } = await sb.storage.from("base").upload(path, bytes, {
-    contentType: `image/${ext === "jpg" ? "jpeg" : ext}`,
-    upsert: false,
-  });
-  if (upErr) throw badRequest("base_ingest_failed", `Could not store base photo: ${upErr.message}`);
 
   const { data: active } = await sb.from("base_photos").select("id").eq("user_id", userId)
     .eq("is_active", true).limit(1).maybeSingle<{ id: string }>();
   const { data: row, error: insErr } = await sb.from("base_photos").insert({
     user_id: userId,
-    url: path,
+    url: objectPath,
     is_active: !active,
   }).select("id").single<{ id: string }>();
   if (insErr || !row) throw badRequest("base_ingest_failed", "Could not register base photo");
@@ -424,20 +425,43 @@ Deno.serve(async (req) => {
       if (poseRef.imageUrl) metaExtra.pose_image_url = poseRef.imageUrl;
     }
 
-    const row = await enqueueRender(sb, {
-      userId: user.id,
-      outfitId,
-      basePhotoId,
-      garmentIds,
-      mode: mode as "tryon" | "compare",
-      tier,
-      idempotencyKey: key,
-      note: str(body.note),
-      pool,
-      metaExtra,
-      poseMode,
-      poseRefId: poseRef?.poseRefId ?? null,
-    });
+    let row: { id: string; status: string };
+    try {
+      row = await enqueueRender(sb, {
+        userId: user.id,
+        outfitId,
+        basePhotoId,
+        garmentIds,
+        mode: mode as "tryon" | "compare",
+        tier,
+        idempotencyKey: key,
+        note: str(body.note),
+        pool,
+        metaExtra,
+        poseMode,
+        poseRefId: poseRef?.poseRefId ?? null,
+      });
+    } catch (e) {
+      if ((e as { code?: string }).code !== "23505") throw e;
+      // The renders.idempotency_key UNIQUE constraint is GLOBAL, while the
+      // lookup above is user-scoped: we lost either a same-user enqueue race
+      // (adopt the winner, 0 net spend) or a cross-user actor pre-registered
+      // this client-supplied key (never let the victim pay — refund).
+      await refundAllowance(sb, user.id, pool);
+      const winner = await findRenderByKey(sb, user.id, key);
+      if (winner && isReusableRow(winner)) {
+        return json({
+          ...(await statusPayload(sb, winner)),
+          idempotency_key: key,
+          cached: true,
+        }, 200);
+      }
+      throw new HttpError(
+        409,
+        "idempotency_conflict",
+        "This render key is already in use — the request was not charged.",
+      );
+    }
 
     return json({
       render_id: row.id,

@@ -8,13 +8,15 @@
 //   checkout.session.completed / payment_intent.succeeded with
 //     metadata { user_id (VAI UUID, required), pack (credits_10 | credits_25 |
 //     hd_single, required) } → entitlements std/hd credits + pack ledger memo.
-//   charge.refunded → audit memo only (credits are NOT auto-debited; ops
-//     reviews — a refunded pack already partially consumed can't be unspent).
+//   charge.refunded → when the charge carries VAI metadata (user_id + pack),
+//     pack credits are debited atomically (floored at 0, retry-safe); without
+//     attribution → audit memo for ops review (ids only — no PII in logs).
 //   customer.subscription.* → ignored + memo (subscriptions route via RC).
 // Retry-safe: Stripe event ids dedupe through ledger meta.
 
 import { admin } from "../_shared/auth.ts";
 import {
+  debitPackCreditsForRefund,
   grantPackCredits,
   hmacSha256Hex,
   isUuid,
@@ -96,12 +98,30 @@ Deno.serve(async (req) => {
     }
 
     if (type === "charge.refunded") {
-      // Memo only — see header note on why credits aren't auto-debited.
-      // (No ledger row: refunds carry no VAI user FK; the server log + Stripe
-      // dashboard are the audit trail for ops review.)
-      console.error("[billing-stripe] refund requires ops review", {
+      // Refund handling: when the charge carries VAI attribution metadata
+      // (user_id + pack, set at checkout creation), debit the pack credits
+      // atomically (floored at 0, retry-safe via the ledger claim). Without
+      // attribution the refund is logged for ops review — ids only, never
+      // the raw charge object (customer email/PII).
+      const obj = event.data?.object ?? {};
+      const md = (obj.metadata ?? {}) as Record<string, unknown>;
+      const userId = typeof md.user_id === "string" ? md.user_id : "";
+      const pack = typeof md.pack === "string" ? md.pack : "";
+      const chargeId = typeof obj.id === "string" ? obj.id : null;
+      if (isUuid(userId) && pack) {
+        await requireUserExists(sb, userId);
+        const res = await debitPackCreditsForRefund(sb, {
+          userId,
+          pack,
+          eventId: `${eventId}:refund`,
+        });
+        return json({ ok: true, action: "credits_debited", debited: res.debited });
+      }
+      console.error("[billing-stripe] refund without VAI attribution requires ops review", {
         eventId,
-        object: event.data?.object ?? null,
+        chargeId,
+        has_user_metadata: isUuid(userId),
+        has_pack_metadata: pack.length > 0,
       });
       return json({ ok: true, action: "refund_logged_for_review" });
     }

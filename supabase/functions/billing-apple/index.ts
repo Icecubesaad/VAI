@@ -1,16 +1,14 @@
 // billing-apple — App Store Server Notifications v2 (fallback / audit path).
 // POST /functions/v1/billing-apple { signedPayload }  (no JWT)
-// Verify (secrets.md verify column):
-//   1. JWS compact structure (3 segments, JSON payload) — malformed → 400.
-//   2. data.bundleId === APPLE_BUNDLE_ID when configured; when the env var is
-//      UNSET the check is skipped with a loud server log (operator must set
-//      it — documented in supabase/secrets.md).
-//   3. signedDate recency (±24h) against replayed notifications.
-//   4. The nested signedTransactionInfo JWS is decoded the same way.
-// LIMITATION (stated, not hidden): full x5c certificate-chain verification
-// against the Apple Root CA is NOT performed here — RevenueCat remains the
-// system of record and cross-checks these events. A follow-up can bundle the
-// Apple root + WebCrypto ECDSA verify when the direct path becomes primary.
+// Verify (_shared/jws.ts, fail closed):
+//   1. FULL cryptographic verification of the signedPayload JWS: ES256
+//      signature against the x5c leaf key, every chain link verified
+//      cryptographically, chain anchored to Apple Root CA - G3, all certs
+//      inside their validity windows. Unsigned/forged payloads → 401.
+//   2. data.bundleId must equal APPLE_BUNDLE_ID — the env var is REQUIRED
+//      (unset → 500 not_configured; the check never silently skips).
+//   3. signedDate recency (±24h).
+//   4. The nested signedTransactionInfo JWS is verified the same way.
 // Notification mapping → sub_status:
 //   SUBSCRIBED (INITIAL_BUY + offerType intro) → trialing, else active
 //   DID_RENEW / SUBSCRIBED(other) / DID_CHANGE_RENEWAL_STATUS(auto-renew on)
@@ -23,14 +21,14 @@
 
 import { admin } from "../_shared/auth.ts";
 import {
-  badSignature,
-  decodeJwsPayload,
   isUuid,
+  notConfigured,
   requireUserExists,
   upsertSubscription,
   type SubStatus,
 } from "../_shared/billing.ts";
-import { handleOptions, json, requireMethod, toErrorResponse } from "../_shared/http.ts";
+import { verifyAppleJws } from "../_shared/jws.ts";
+import { handleOptions, HttpError, json, requireMethod, toErrorResponse } from "../_shared/http.ts";
 
 interface AppleNotification {
   notificationType?: string;
@@ -66,21 +64,22 @@ Deno.serve(async (req) => {
 
     let n: AppleNotification;
     try {
-      n = decodeJwsPayload<AppleNotification>(signedPayload);
-    } catch {
-      throw badSignature("signedPayload is not a well-formed JWS");
+      n = await verifyAppleJws<AppleNotification>(signedPayload);
+    } catch (e) {
+      if (e instanceof HttpError) throw e;
+      throw badSignature("signedPayload failed verification");
     }
     const type = n.notificationType ?? "";
     const subtype = n.subtype ?? "";
     if (!type) throw badSignature("notification missing notificationType");
 
     const expectedBundle = Deno.env.get("APPLE_BUNDLE_ID");
-    const bundleId = n.data?.bundleId;
-    if (expectedBundle) {
-      if (bundleId !== expectedBundle) throw badSignature("bundleId mismatch");
-    } else {
-      console.warn("[billing-apple] APPLE_BUNDLE_ID unset — bundle check skipped (set it per supabase/secrets.md)");
+    if (!expectedBundle) {
+      // Fail closed: without the bundle pin a forged notification could name
+      // any bundle. Operators must set APPLE_BUNDLE_ID (supabase/secrets.md).
+      throw notConfigured("APPLE_BUNDLE_ID");
     }
+    if (n.data?.bundleId !== expectedBundle) throw badSignature("bundleId mismatch");
     if (typeof n.signedDate === "number") {
       if (Math.abs(Date.now() - n.signedDate) > 24 * 3600 * 1000) {
         throw badSignature("stale notification (signedDate outside 24h)");
@@ -92,9 +91,10 @@ Deno.serve(async (req) => {
     let txn: AppleTransaction = {};
     if (n.data?.signedTransactionInfo) {
       try {
-        txn = decodeJwsPayload<AppleTransaction>(n.data.signedTransactionInfo);
-      } catch {
-        throw badSignature("signedTransactionInfo malformed");
+        txn = await verifyAppleJws<AppleTransaction>(n.data.signedTransactionInfo);
+      } catch (e) {
+        if (e instanceof HttpError) throw e;
+        throw badSignature("signedTransactionInfo failed verification");
       }
     }
 

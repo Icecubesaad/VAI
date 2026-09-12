@@ -9,7 +9,8 @@
 //   `reel-regenerate` and direct `POST /restyle` consume the same pool;
 //   idempotent replays bypass it at 0 cost);
 //   restyle ALWAYS costs 1 credit (free tier additionally consumes the atomic
-//   1/day slot via bump_restyle_daily — bump-FIRST then check, so concurrent
+//   1/day slot via bump_restyle_daily — bumped after the idempotency lookup so
+//   replays never burn it, and the single-statement bump means concurrent
 //   restyles cannot double-spend it, P1-009); Max parents need HD credit.
 // Provider failure → simplified-prompt retry in the pipeline; response always
 // carries keep_best_url + a report so the client can "keep best".
@@ -24,6 +25,7 @@ import {
   consumeAllowance,
   FREE_RESTYLES_PER_DAY,
   getEntitlementState,
+  refundAllowance,
   RESTYLE_MAX_PER_SESSION,
   todayISO,
   type PoolCode,
@@ -123,17 +125,11 @@ export async function requestRestyle(
       { keep_best_url: best?.output_url ?? parent.output_url, keep_best_id: best?.id ?? parent.id });
   }
 
-  // Cost: 1 credit, always. Free tier: atomic daily-slot bump FIRST (single
-  // statement — concurrent restyles serialize on the row, P1-009), then check.
+  // Cost: 1 credit, always. Free tier also burns its 1/day slot — but ONLY
+  // once this request is actually going to enqueue (the bump sits AFTER the
+  // idempotency lookup below, so cache hits never consume the daily slot).
   const ent = await getEntitlementState(sb, userId);
   const tier = (parent.tier === "max" ? "max" : "std") as PipelineTier;
-  if (ent.tier === "free") {
-    const usedToday = await bumpRestyleDaily(sb, userId);
-    if (usedToday > FREE_RESTYLES_PER_DAY) {
-      throw paymentRequired("restyle_daily_exhausted",
-        "Free includes 1 restyle a day. Upgrade for 30 renders a month.", { used: usedToday });
-    }
-  }
 
   const garmentIds = parent.garment_refs?.garment_ids ?? [];
   const key = input.idempotencyKey ?? await buildRenderKey({
@@ -167,6 +163,16 @@ export async function requestRestyle(
   // the client 3/week mirror cannot be bypassed.
   await checkRestyleWeeklyCap(sb, userId);
 
+  // Free tier: atomic daily-slot bump (P1-009) — after idempotency, before
+  // any other money movement.
+  if (ent.tier === "free") {
+    const usedToday = await bumpRestyleDaily(sb, userId);
+    if (usedToday > FREE_RESTYLES_PER_DAY) {
+      throw paymentRequired("restyle_daily_exhausted",
+        "Free includes 1 restyle a day. Upgrade for 30 renders a month.", { used: usedToday });
+    }
+  }
+
   let pool: PoolCode;
   try {
     pool = await consumeAllowance(sb, userId, tier);
@@ -191,31 +197,53 @@ export async function requestRestyle(
       .eq("id", parent.base_photo_id);
   }
 
-  const row = await enqueueRender(sb, {
-    userId,
-    outfitId: parent.outfit_id,
-    basePhotoId: parent.base_photo_id,
-    garmentIds,
-    mode: "restyle",
-    tier,
-    idempotencyKey: key,
-    parentRenderId: parent.id,
-    note: `${note} (preserve face identity, pose, body shape exactly)`,
-    pool,
-    poseMode: input.poseMode,
-    poseRefId: input.poseRefId ?? null,
-    metaExtra: {
-      ...(input.rewrittenPrompt ? { rewritten_prompt: input.rewrittenPrompt.slice(0, 2000) } : {}),
-      ...(input.promptTags ? { prompt_tags: input.promptTags.slice(0, 12) } : {}),
-      ...(input.photoConditions ? { photo_conditions: input.photoConditions } : {}),
-      ...(input.modelHint ? { model_hint: String(input.modelHint).slice(0, 64) } : {}),
-      // Pinterest pose (0005): recorded for the AI crew; the pipeline prompt
-      // is unchanged (keep path) until the adapt consumer lands.
-      pose_mode: input.poseMode ?? "keep",
-      ...(input.poseRefId ? { pose_ref_id: input.poseRefId } : {}),
-      ...(input.poseImageUrl ? { pose_image_url: input.poseImageUrl } : {}),
-    },
-  });
+  let row: { id: string; status: string };
+  try {
+    row = await enqueueRender(sb, {
+      userId,
+      outfitId: parent.outfit_id,
+      basePhotoId: parent.base_photo_id,
+      garmentIds,
+      mode: "restyle",
+      tier,
+      idempotencyKey: key,
+      parentRenderId: parent.id,
+      note: `${note} (preserve face identity, pose, body shape exactly)`,
+      pool,
+      poseMode: input.poseMode,
+      poseRefId: input.poseRefId ?? null,
+      metaExtra: {
+        ...(input.rewrittenPrompt ? { rewritten_prompt: input.rewrittenPrompt.slice(0, 2000) } : {}),
+        ...(input.promptTags ? { prompt_tags: input.promptTags.slice(0, 12) } : {}),
+        ...(input.photoConditions ? { photo_conditions: input.photoConditions } : {}),
+        ...(input.modelHint ? { model_hint: String(input.modelHint).slice(0, 64) } : {}),
+        // Pinterest pose (0005): recorded for the AI crew; the pipeline prompt
+        // is unchanged (keep path) until the adapt consumer lands.
+        pose_mode: input.poseMode ?? "keep",
+        ...(input.poseRefId ? { pose_ref_id: input.poseRefId } : {}),
+        ...(input.poseImageUrl ? { pose_image_url: input.poseImageUrl } : {}),
+      },
+    });
+  } catch (e) {
+    if ((e as { code?: string }).code !== "23505") throw e;
+    // Global idempotency_key UNIQUE vs user-scoped lookup: lost a same-user
+    // race (adopt the winner) or the key was pre-registered cross-user —
+    // refund either way so the victim never pays for an unrendered restyle.
+    await refundAllowance(sb, userId, pool);
+    const winner = await findRenderByKey(sb, userId, key);
+    if (winner && isReusableRow(winner)) {
+      return {
+        render_id: winner.id,
+        status: winner.status,
+        cached: true,
+        keep_best_url: parent.output_url,
+        rewritten_prompt: input.rewrittenPrompt ?? undefined,
+        report: null,
+        idempotency_key: key,
+      };
+    }
+    throw forbidden("idempotency_conflict", "This restyle key is already in use — the request was not charged.");
+  }
 
   return {
     render_id: row.id,

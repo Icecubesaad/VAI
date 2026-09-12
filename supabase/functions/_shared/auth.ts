@@ -28,7 +28,9 @@ export function admin(): SupabaseClient {
 }
 
 function newReferralCode(): string {
-  const buf = new Uint8Array(4);
+  // 6 chars — matches the redemption regex `VAI-[A-Z0-9]{4,6}` (referral-credit).
+  // Legacy 4-char codes minted before 0007 still redeem via the {4,6} form.
+  const buf = new Uint8Array(6);
   crypto.getRandomValues(buf);
   const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
   let s = "";
