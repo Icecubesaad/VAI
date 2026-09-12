@@ -12,16 +12,87 @@
  * while a background refresh runs, but NOTHING here can grant a render.
  * The grant decision lives in quotas.ts against a fresh-or-reconciled snapshot.
  */
-import { createMMKV } from 'react-native-mmkv';
+import { createMMKV, type MMKV } from 'react-native-mmkv';
 import type { KVStore } from './image-pipeline';
 
-export const mmkv = createMMKV({ id: 'vai-perf' });
+/**
+ * Lazy MMKV (`vai-perf`) with in-memory fallback. Same crash class as
+ * store/mmkv.ts: `createMMKV` at module scope threw during the _layout
+ * import graph when the Nitro module failed to load. Deferred to first use;
+ * failure degrades to a session-scoped Map (caches miss, app boots).
+ */
+const memory = new Map<string, string>();
+
+let _mmkv: MMKV | null = null;
+let _degraded = false;
+
+/** Never throws — returns null when the native module is unavailable. */
+function getMMKV(): MMKV | null {
+  if (_mmkv) return _mmkv;
+  if (_degraded) return null;
+  try {
+    _mmkv = createMMKV({ id: 'vai-perf' });
+    return _mmkv;
+  } catch {
+    _degraded = true;
+    return null;
+  }
+}
+
+/** Perf-namespace MMKV. Lazily created; safe to import. */
+export const mmkv: MMKV = new Proxy({} as MMKV, {
+  get(_target, prop) {
+    if (typeof prop === 'symbol') return undefined;
+    const inst = getMMKV();
+    if (!inst) {
+      if (prop === 'getString') return (key: string) => memory.get(key) ?? undefined;
+      if (prop === 'set') {
+        return (key: string, value: string) => {
+          memory.set(key, value);
+        };
+      }
+      if (prop === 'remove') return (key: string) => memory.delete(key);
+      if (prop === 'getAllKeys') return () => [...memory.keys()];
+      if (prop === 'contains') return (key: string) => memory.has(key);
+      if (prop === 'clearAll') {
+        return () => {
+          memory.clear();
+        };
+      }
+      if (prop === 'id') return 'vai-perf-memory';
+      return undefined;
+    }
+    const value = (inst as unknown as Record<string, unknown>)[prop];
+    return typeof value === 'function'
+      ? (value as (...args: unknown[]) => unknown).bind(inst)
+      : value;
+  },
+});
 
 /** KV adapter so image-pipeline resumable uploads persist sessions here. */
 export const mmkvKV: KVStore = {
-  get: (key) => mmkv.getString(key) ?? null,
-  set: (key, value) => mmkv.set(key, value),
-  del: (key) => mmkv.remove(key),
+  get: (key) => {
+    try {
+      return mmkv.getString(key) ?? null;
+    } catch {
+      return memory.get(key) ?? null;
+    }
+  },
+  set: (key, value) => {
+    try {
+      mmkv.set(key, value);
+    } catch {
+      memory.set(key, value);
+    }
+  },
+  del: (key) => {
+    try {
+      mmkv.remove(key);
+    } catch {
+      /* degraded — fall through to memory */
+    }
+    memory.delete(key);
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -53,7 +124,12 @@ export class TTLCache<T> {
   ) {}
 
   private readEnvelope(): Envelope<T> | null {
-    const raw = mmkv.getString(this.key);
+    let raw: string | undefined;
+    try {
+      raw = mmkv.getString(this.key);
+    } catch {
+      return null;
+    }
     if (!raw) return null;
     try {
       const env = JSON.parse(raw) as Envelope<T>;
@@ -84,11 +160,19 @@ export class TTLCache<T> {
       ttlMs: ttlMs ?? this.defaultTtlMs,
       data,
     };
-    mmkv.set(this.key, JSON.stringify(env));
+    try {
+      mmkv.set(this.key, JSON.stringify(env));
+    } catch {
+      /* cache write failure must never crash — next read just misses */
+    }
   }
 
   invalidate(): void {
-    mmkv.remove(this.key);
+    try {
+      mmkv.remove(this.key);
+    } catch {
+      /* best-effort */
+    }
   }
 }
 
@@ -183,11 +267,19 @@ export function invalidateOnDnaChange(): void {
 
 /** Base-photo retake: FASHN cache key changes (sha256(user:active_photo)). */
 export function invalidateOnBasePhotoRetake(): void {
-  mmkv.remove('upload:base-photo:session');
+  try {
+    mmkv.remove('upload:base-photo:session');
+  } catch {
+    /* best-effort */
+  }
 }
 
 /** Logout / account delete: wipe the whole perf namespace, no leaks across users. */
 export function clearAllOnLogout(): void {
-  const keys = mmkv.getAllKeys();
-  for (const k of keys) mmkv.remove(k);
+  try {
+    const keys = mmkv.getAllKeys();
+    for (const k of keys) mmkv.remove(k);
+  } catch {
+    /* best-effort */
+  }
 }

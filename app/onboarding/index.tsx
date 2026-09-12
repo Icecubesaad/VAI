@@ -55,6 +55,10 @@ export default function OnboardingCarousel() {
         pagingEnabled
         showsHorizontalScrollIndicator={false}
         keyExtractor={(s) => s.key}
+        // onMomentumScrollEnd alone misses programmatic scrolls and web
+        // flings (dots stuck, Next stuck on slide 2) — track offset directly.
+        onScroll={(e) => setPage(Math.round(e.nativeEvent.contentOffset.x / width))}
+        scrollEventThrottle={16}
         onMomentumScrollEnd={(e) => setPage(Math.round(e.nativeEvent.contentOffset.x / width))}
         renderItem={({ item }) => (
           <View style={[styles.slide, { width }]}>

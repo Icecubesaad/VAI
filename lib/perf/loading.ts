@@ -73,6 +73,9 @@ export async function awaitAppReady(gates: AppReadyGates): Promise<AppReadyResul
 
   const ready = Promise.all([gates.fontsLoaded, gates.routerMounted]).then(
     () => ({ timedOut: false as const }),
+    // A rejecting gate must never trap the splash — hide and let
+    // per-screen skeletons take over (same as the failsafe path).
+    () => ({ timedOut: false as const }),
   );
   const failsafe = new Promise<{ timedOut: true }>((resolve) =>
     setTimeout(() => resolve({ timedOut: true }), SPLASH_FAILSAFE_MS),
@@ -91,7 +94,11 @@ export async function awaitAppReady(gates: AppReadyGates): Promise<AppReadyResul
 
   // Post-hide: warm above-the-fold images without blocking interaction.
   if (gates.criticalUrls && gates.criticalUrls.length > 0) {
-    prewarmCritical(gates.criticalUrls);
+    try {
+      prewarmCritical(gates.criticalUrls);
+    } catch (err) {
+      reportError(err, { where: 'prewarmCritical' });
+    }
   }
 
   return { ttiMs, timedOut: outcome.timedOut, hydrated };

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Image } from 'expo-image';
 import * as FileSystem from 'expo-file-system';
+import * as ImagePicker from 'expo-image-picker';
 import { decode } from 'base64-arraybuffer';
 import { useTheme } from '@/theme';
 import { BUCKETS, createSignedBasePhotoUrl, supabase } from '@/lib/supabase';
@@ -49,8 +50,57 @@ export default function SelfieCapture() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!permission?.granted) void requestPermission();
+    if (Platform.OS !== 'web' && !permission?.granted) void requestPermission();
   }, [permission?.granted, requestPermission]);
+
+  /** Shared quality gate for camera AND library photos (same bar, either source). */
+  const gatePhoto = useCallback(async (uri: string, width: number, height: number) => {
+    if (width < 720 || height < 720) {
+      setPreview(uri);
+      setFail('too_small');
+      return;
+    }
+    if (height < width * 1.2) {
+      setPreview(uri);
+      setFail('not_portrait');
+      return;
+    }
+    try {
+      const info = await FileSystem.getInfoAsync(uri);
+      if (info.exists && typeof info.size === 'number' && info.size < 50_000) {
+        setPreview(uri);
+        setFail('too_dark');
+        return;
+      }
+    } catch {
+      // Non-fatal: proceed to upload and let the server re-validate.
+    }
+    setPreview(uri);
+  }, []);
+
+  /** Upload a taken picture instead of shooting one — same gate, same upload. */
+  const pickFromLibrary = useCallback(async () => {
+    if (!ageGatePassed(useSession.getState())) {
+      setError('Complete the age check first — VAI is for ages 13 and up.');
+      return;
+    }
+    setFail(null);
+    setError(null);
+    setBusy('capture');
+    try {
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.9,
+      });
+      if (res.canceled || !res.assets?.[0]?.uri) return;
+      const asset = res.assets[0];
+      await gatePhoto(asset.uri, asset.width ?? 0, asset.height ?? 0);
+    } catch {
+      setError('Could not open that photo. Please try another.');
+    } finally {
+      setBusy(null);
+    }
+  }, [gatePhoto]);
 
   const capture = useCallback(async () => {
     // Belt-and-braces: the render block below keeps the camera unmounted, but
@@ -116,9 +166,22 @@ export default function SelfieCapture() {
     try {
       const userId = useSession.getState().userId;
       if (!userId) throw new Error('auth');
-      const b64 = await FileSystem.readAsStringAsync(preview, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
+      // Base64 the bytes: FileSystem on native, fetch fallback for web blob URIs.
+      let b64: string;
+      try {
+        b64 = await FileSystem.readAsStringAsync(preview, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+      } catch {
+        const fetched = await fetch(preview);
+        const buf = new Uint8Array(await fetched.arrayBuffer());
+        let bin = '';
+        const CHUNK = 0x8000;
+        for (let i = 0; i < buf.length; i += CHUNK) {
+          bin += String.fromCharCode(...buf.subarray(i, i + CHUNK));
+        }
+        b64 = btoa(bin);
+      }
       // Private `base` bucket (never public) — path `<uid>/base-<ts>.jpg`.
       const path = `${userId}/base-${Date.now()}.jpg`;
       const { error: upErr } = await supabase.storage
@@ -213,6 +276,41 @@ export default function SelfieCapture() {
     );
   }
 
+  // Web has no camera capture: upload panel instead of the CameraView.
+  if (Platform.OS === 'web' && !preview) {
+    return (
+      <View style={[styles.center, { backgroundColor: colors.background }]} testID="selfie-upload">
+        <Text style={[styles.title, { color: colors.text }]}>Add your photo</Text>
+        <Text style={[styles.body, { color: colors.muted }]}>
+          Upload a full-body photo — daylight, plain background, head to shoes in frame. Used
+          only for your try-ons, never public without opt-in.
+        </Text>
+        <Pressable
+          style={[styles.button, styles.wide, { backgroundColor: colors.primary }]}
+          onPress={() => void pickFromLibrary()}
+          disabled={busy === 'capture'}
+          testID="selfie-library"
+        >
+          {busy === 'capture' ? (
+            <ActivityIndicator color={colors.onPrimary} />
+          ) : (
+            <Text style={[styles.buttonText, { color: colors.onPrimary }]}>Choose from library</Text>
+          )}
+        </Pressable>
+        {!!fail && (
+          <Text style={[styles.fail, { color: colors.danger }]} testID="selfie-fail">
+            {FAIL_COPY[fail]}
+          </Text>
+        )}
+        {!!error && !fail && (
+          <Text style={[styles.fail, { color: colors.danger }]} testID="selfie-error">
+            {error}
+          </Text>
+        )}
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.root, { backgroundColor: '#000' }]} testID="selfie-screen">
       {preview ? (
@@ -288,6 +386,16 @@ export default function SelfieCapture() {
             )}
           </Pressable>
         )}
+        {!preview && (
+          <Pressable
+            style={[styles.button, { backgroundColor: colors.surface }]}
+            onPress={() => void pickFromLibrary()}
+            disabled={busy === 'capture'}
+            testID="selfie-library"
+          >
+            <Text style={[styles.buttonText, { color: colors.text }]}>Choose from library</Text>
+          </Pressable>
+        )}
       </View>
     </View>
   );
@@ -308,6 +416,7 @@ const styles = StyleSheet.create({
   consent: { fontSize: 12 },
   row: { flexDirection: 'row', gap: 10 },
   button: { borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
+  wide: { alignSelf: 'stretch' },
   half: { flex: 1 },
   buttonText: { fontSize: 16, fontWeight: '700' },
 });

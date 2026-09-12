@@ -50,16 +50,17 @@ export default function AuthScreen() {
   const [ageError, setAgeError] = useState<string | null>(null);
 
   /**
-   * Validate the DOB gate before any auth attempt. Returns the gate payload
-   * or null (error already surfaced). Under-13 is refused with kind copy;
-   * 13–17 requires the parental-consent checkbox.
+   * Validate the DOB gate before any auth attempt. Input is digit-sanitized at
+   * entry (autofill/paste can smuggle spaces or separators that silently fail
+   * parse), so a rejection here always means a genuinely bad year.
    */
   const readAgeGate = useCallback((): {
     birthYear: number;
     ageBand: AgeBand;
     parentalConsent: boolean;
   } | null => {
-    const birthYear = Number.parseInt(birthYearInput.trim(), 10);
+    const digits = birthYearInput.replace(/\D/g, '').slice(0, 4);
+    const birthYear = digits.length === 4 ? Number.parseInt(digits, 10) : NaN;
     const nowYear = currentYear();
     if (!Number.isInteger(birthYear) || birthYear < 1900 || birthYear > nowYear) {
       setAgeError(`Enter your 4-digit birth year (1900–${nowYear}).`);
@@ -152,6 +153,21 @@ export default function AuthScreen() {
     setBusy(null);
   }, []);
 
+  // Live age preview (no errors): shows what the entered year means and
+  // whether consent is needed — a rejection is never a mystery.
+  const digitsOnly = birthYearInput.replace(/\D/g, '').slice(0, 4);
+  const previewYear = digitsOnly.length === 4 ? Number.parseInt(digitsOnly, 10) : null;
+  const previewBand: AgeBand | null =
+    previewYear !== null &&
+    Number.isInteger(previewYear) &&
+    previewYear >= 1900 &&
+    previewYear <= currentYear()
+      ? ageBandForBirthYear(previewYear)
+      : null;
+  const previewAge = previewYear !== null && previewBand !== null ? currentYear() - previewYear : null;
+  // Consent box only matters for 13–17 — hidden for adults and empty input.
+  const needsConsent = previewBand === 'p13_17';
+
   const handleApple = useCallback(async () => {
     if (Platform.OS !== 'ios') {
       setError('Apple sign-in is available on iOS only — use Google or email.');
@@ -188,12 +204,25 @@ export default function AuthScreen() {
     setError(null);
     setBusy('google');
     try {
-      // Supabase JS v2 `signInWithOAuth` returns { data: { provider, url }, error }
-      // — no session. Open the provider URL in a system browser session; the
-      // PKCE code comes back on our deep link and the session is established
-      // via `exchangeCodeForSession`, which also fires `onAuthStateChange`
-      // (root layout) as the cross-screen fallback.
       const redirectTo = makeRedirectUri({ scheme: 'vai', path: 'auth/callback' });
+      if (Platform.OS === 'web') {
+        // Web has no app to deep-link back to: full-page redirect. The
+        // pending gate survives the reload in localStorage; /auth/callback
+        // finishes onboarding routing (session auto-exchanges via
+        // detectSessionInUrl on web). The redirect target must be allowlisted
+        // in the Supabase dashboard (Authentication → URL configuration).
+        try {
+          localStorage.setItem('vai-pending-gate', JSON.stringify(gate));
+        } catch {
+          // Non-fatal: user re-enters the year after returning.
+        }
+        const { error: err } = await supabase.auth.signInWithOAuth({
+          provider: 'google',
+          options: { redirectTo },
+        });
+        if (err) throw err;
+        return; // browser is leaving; nothing more to do here.
+      }
       const { data, error: err } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: { redirectTo, skipBrowserRedirect: true },
@@ -240,8 +269,19 @@ export default function AuthScreen() {
           ? await supabase.auth.signUp({ email: clean, password })
           : await supabase.auth.signInWithPassword({ email: clean, password });
       if (err) throw err;
-      const u = data.user ?? (await supabase.auth.getUser()).data.user;
-      if (!u) throw new Error('Check your email to confirm, then sign in.');
+      // No session = email confirmation still pending. STOP here: routing
+      // onward with a user-but-no-session is what used to produce a cascade
+      // of 401s ("Please sign in to continue") on every backend call.
+      if (!data.session) {
+        setBusy(null);
+        setError(
+          mode === 'up'
+            ? 'Account created — check your inbox to confirm your email, then sign in.'
+            : 'Check your inbox to confirm your email, then sign in.',
+        );
+        return;
+      }
+      const u = data.session.user;
       await finish(u.id, u.email ?? clean, gate);
     } catch (e) {
       fail(e);
@@ -261,7 +301,7 @@ export default function AuthScreen() {
       <TextInput
         value={birthYearInput}
         onChangeText={(t) => {
-          setBirthYearInput(t);
+          setBirthYearInput(t.replace(/\D/g, '').slice(0, 4));
           setAgeError(null);
         }}
         placeholder="YYYY (e.g. 1999)"
@@ -270,6 +310,12 @@ export default function AuthScreen() {
         style={[styles.input, { borderColor: colors.border, color: colors.text }]}
         testID="auth-birth-year"
       />
+      {previewAge !== null && previewBand !== null && (
+        <Text style={[styles.agePreview, { color: colors.muted }]} testID="auth-age-preview">
+          Age {previewAge} · {previewBand === 'adult' ? 'adult, no consent needed' : 'ages 13–17, consent needed'}
+        </Text>
+      )}
+      {needsConsent && (
       <Pressable
         onPress={() => {
           setParentalChecked((v) => !v);
@@ -296,6 +342,7 @@ export default function AuthScreen() {
           My parent or guardian consents to my VAI account (required ages 13–17).
         </Text>
       </Pressable>
+      )}
       {!!ageError && (
         <Text style={[styles.ageError, { color: colors.danger }]} testID="auth-age-error">
           {ageError}
@@ -312,7 +359,7 @@ export default function AuthScreen() {
         />
       )}
       <Pressable
-        style={[styles.button, { borderColor: colors.border, borderWidth: 1 }]}
+        style={[styles.button, styles.googleButton, { borderColor: colors.border, borderWidth: 1, backgroundColor: colors.surface }]}
         onPress={() => void handleGoogle()}
         disabled={busy !== null}
         testID="auth-google"
@@ -320,7 +367,10 @@ export default function AuthScreen() {
         {busy === 'google' ? (
           <ActivityIndicator />
         ) : (
-          <Text style={[styles.buttonText, { color: colors.text }]}>Continue with Google</Text>
+          <View style={styles.googleRow}>
+            <Text style={styles.googleG}>G</Text>
+            <Text style={[styles.buttonText, { color: colors.text }]}>Continue with Google</Text>
+          </View>
         )}
       </Pressable>
 
@@ -394,6 +444,10 @@ const styles = StyleSheet.create({
   apple: { width: '100%', height: 52 },
   button: { borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
   buttonText: { fontSize: 15, fontWeight: '600' },
+  googleButton: { paddingVertical: 13 },
+  googleRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  googleG: { fontSize: 18, fontWeight: '800', color: '#4285F4' },
+  agePreview: { fontSize: 13, marginTop: 2 },
   divider: { alignItems: 'center', marginVertical: 4 },
   dividerText: { fontSize: 13 },
   input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },

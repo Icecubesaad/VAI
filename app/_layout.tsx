@@ -7,7 +7,8 @@ import * as Notifications from 'expo-notifications';
 import * as SplashScreen from 'expo-splash-screen';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ThemeProvider } from '@/theme';
-import { supabase } from '@/lib/supabase';
+import { getSupabase, isBackendConfigured } from '@/lib/supabase';
+import { BackendMisconfiguredScreen, RootErrorBoundary } from '@/components/RootErrorBoundary';
 import {
   addNotificationRouter,
   deepLinkForPush,
@@ -26,8 +27,13 @@ import { usePaywall } from '@/store/paywall';
 // Perf loading recipe (CONTRACT-perf.md + APP-LOADING-SPLASH.md): mark launch
 // + hold the OS splash BEFORE first render. `awaitAppReady` hides the splash
 // (fonts + router gates raced against the 4s failsafe — never a hang).
-markAppLaunch();
-void SplashScreen.preventAutoHideAsync().catch(() => undefined);
+// Guarded: a synchronous native-module failure here must not brick boot.
+try {
+  markAppLaunch();
+  void SplashScreen.preventAutoHideAsync().catch(() => undefined);
+} catch {
+  /* timing/splash hold is best-effort — the boot gate still hides below */
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -167,6 +173,10 @@ function pendingCriticalUrls(): string[] {
 
 export default function RootLayout() {
   const [ready, setReady] = useState(false);
+  const [backendError, setBackendError] = useState(false);
+  const [bootError, setBootError] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const [bootTick, setBootTick] = useState(0);
   const rootNav = useRootNavigationState();
   const router = useRouter();
   const routerMounted = rootNav?.key != null;
@@ -217,42 +227,78 @@ export default function RootLayout() {
   usePushRouter(handlePushRoute);
 
   // Supabase auth events → session store (boot-time session comes from the gate below).
+  // Gated: without credentials there is no client to subscribe to.
   useEffect(() => {
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      const u = session?.user;
-      if (u) useSession.getState().setAuth({ userId: u.id, email: u.email ?? null });
-    });
+    if (!isBackendConfigured()) return;
+    let unsubscribe: (() => void) | null = null;
+    try {
+      const { data: sub } = getSupabase().auth.onAuthStateChange((_event, session) => {
+        const u = session?.user;
+        if (u) useSession.getState().setAuth({ userId: u.id, email: u.email ?? null });
+      });
+      unsubscribe = () => sub.subscription.unsubscribe();
+    } catch {
+      return;
+    }
     return () => {
-      sub.subscription.unsubscribe();
+      try {
+        unsubscribe?.();
+      } catch {
+        /* listener teardown is best-effort */
+      }
     };
   }, []);
 
-  // Boot gate (APP-LOADING-SPLASH.md): MMKV sync hydrate (zero blocking
-  // network) → session rehydrate → two-gate splash hide → post-paint refresh
-  // in order (paywall-status → quota mirror merge inside fetchStatus).
+  // Boot gate (APP-LOADING-SPLASH.md): backend check FIRST → MMKV sync
+  // hydrate (zero blocking network) → session rehydrate → two-gate splash
+  // hide → post-paint refresh in order (paywall-status → quota mirror merge
+  // inside fetchStatus). Every path hides the splash, including error paths.
   useEffect(() => {
     if (bootedRef.current || !routerMounted) return;
     bootedRef.current = true;
     void (async () => {
-      hydrateCachesSync();
-      const [sessionRes, initialUrl, pushLink] = await Promise.all([
-        supabase.auth.getSession().catch(() => null),
-        Linking.getInitialURL().catch(() => null),
-        lastPushReelLink(),
-      ]);
-      const u = sessionRes?.data.session?.user;
-      if (u) useSession.getState().setAuth({ userId: u.id, email: u.email ?? null });
-      if (initialUrl) handleUrl(initialUrl);
-      // Killed-state Monday-push tap: same reel routing via the stashed week.
-      if (pushLink) handleUrl(pushLink);
-      // Fonts gate: no font assets ship in v1 (UI/UX turf) — a resolved
-      // promise keeps the two-gate shape so fonts plug in without restructuring.
-      await awaitAppReady({
-        fontsLoaded: Promise.resolve(),
-        routerMounted: Promise.resolve(),
-        criticalUrls: pendingCriticalUrls(),
-        fromPush: pendingRenderRef.current != null,
-      });
+      // Backend gate FIRST: never touch the supabase client without
+      // credentials — render the error screen instead of crashing.
+      if (!isBackendConfigured()) {
+        try {
+          await SplashScreen.hideAsync();
+        } catch {
+          /* never trap the user behind the splash */
+        }
+        setBackendError(true);
+        return;
+      }
+      try {
+        hydrateCachesSync();
+        const [sessionRes, initialUrl, pushLink] = await Promise.all([
+          getSupabase().auth.getSession().catch(() => null),
+          Linking.getInitialURL().catch(() => null),
+          lastPushReelLink(),
+        ]);
+        const u = sessionRes?.data.session?.user;
+        if (u) useSession.getState().setAuth({ userId: u.id, email: u.email ?? null });
+        if (initialUrl) handleUrl(initialUrl);
+        // Killed-state Monday-push tap: same reel routing via the stashed week.
+        if (pushLink) handleUrl(pushLink);
+        // Fonts gate: no font assets ship in v1 (UI/UX turf) — a resolved
+        // promise keeps the two-gate shape so fonts plug in without restructuring.
+        await awaitAppReady({
+          fontsLoaded: Promise.resolve(),
+          routerMounted: Promise.resolve(),
+          criticalUrls: pendingCriticalUrls(),
+          fromPush: pendingRenderRef.current != null,
+        });
+      } catch {
+        // Unexpected boot failure: hide the splash and show the retryable
+        // error screen instead of hanging on the boot spinner.
+        try {
+          await SplashScreen.hideAsync();
+        } catch {
+          /* never trap the user behind the splash */
+        }
+        setBootError(true);
+        return;
+      }
       setReady(true);
       readyRef.current = true;
       // Post-paint only: screens own closet delta / plan-day / prefetch.
@@ -272,31 +318,73 @@ export default function RootLayout() {
         );
       }
     })();
-  }, [routerMounted, handleUrl, router]);
+  }, [routerMounted, handleUrl, router, bootTick]);
+
+  // Backend-error retry: env is baked at build time, so this only succeeds
+  // after a reinstall / OTA that restores vars — re-check without crashing.
+  const handleBackendRetry = useCallback(() => {
+    if (retrying) return;
+    setRetrying(true);
+    setTimeout(() => {
+      setRetrying(false);
+      if (isBackendConfigured()) {
+        setBackendError(false);
+        setBootError(false);
+        bootedRef.current = false;
+        setBootTick((t) => t + 1);
+      }
+    }, 300);
+  }, [retrying]);
+
+  if (backendError) {
+    return (
+      <RootErrorBoundary>
+        <BackendMisconfiguredScreen onRetry={handleBackendRetry} retrying={retrying} />
+      </RootErrorBoundary>
+    );
+  }
+
+  if (bootError) {
+    return (
+      <RootErrorBoundary>
+        <BackendMisconfiguredScreen
+          title="Something went wrong"
+          message="VAI hit a problem while starting. Try again — if this keeps happening, reinstall the app or contact support."
+          onRetry={handleBackendRetry}
+          retrying={retrying}
+          testID="root-boot-error"
+        />
+      </RootErrorBoundary>
+    );
+  }
 
   if (!ready) {
     return (
-      <View style={styles.boot} testID="root-boot">
-        <ActivityIndicator size="large" />
-      </View>
+      <RootErrorBoundary>
+        <View style={styles.boot} testID="root-boot">
+          <ActivityIndicator size="large" />
+        </View>
+      </RootErrorBoundary>
     );
   }
 
   return (
-    <SafeAreaProvider>
-      <ThemeProvider>
-        <QueryClientProvider client={queryClient}>
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="index" />
-            <Stack.Screen name="(tabs)" />
-            <Stack.Screen name="onboarding" />
-            <Stack.Screen name="pose-pack" />
-            <Stack.Screen name="pinterest-connect" />
-            <Stack.Screen name="pinterest-boards" />
-          </Stack>
-        </QueryClientProvider>
-      </ThemeProvider>
-    </SafeAreaProvider>
+    <RootErrorBoundary>
+      <SafeAreaProvider>
+        <ThemeProvider>
+          <QueryClientProvider client={queryClient}>
+            <Stack screenOptions={{ headerShown: false }}>
+              <Stack.Screen name="index" />
+              <Stack.Screen name="(tabs)" />
+              <Stack.Screen name="onboarding" />
+              <Stack.Screen name="pose-pack" />
+              <Stack.Screen name="pinterest-connect" />
+              <Stack.Screen name="pinterest-boards" />
+            </Stack>
+          </QueryClientProvider>
+        </ThemeProvider>
+      </SafeAreaProvider>
+    </RootErrorBoundary>
   );
 }
 

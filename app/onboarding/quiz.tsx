@@ -16,12 +16,24 @@ const OPTIONS: Record<QuizStepKey, { key: keyof QuizAnswers; choices: string[] }
 };
 
 const STEP_LABEL: Record<QuizStepKey, { title: string; hint: string }> = {
-  style: { title: 'Your everyday style?', hint: 'Pick the closest — DNA refines from your closet.' },
-  palette: { title: 'Colors you reach for?', hint: 'This seeds your palette + color season.' },
-  dressCode: { title: 'Typical dress code?', hint: 'Work + weekends shape the plan.' },
+  style: { title: 'Your everyday style?', hint: 'Pick all that fit — up to 3.' },
+  palette: { title: 'Colors you reach for?', hint: 'Pick all that fit — up to 3.' },
+  dressCode: { title: 'Typical dress code?', hint: 'Pick all that fit — up to 3.' },
   boldness: { title: 'How bold? (1–5)', hint: '1 = quiet classics, 5 = main-character energy.' },
   budget: { title: 'Budget per piece?', hint: 'Gap picks respect this band.' },
 };
+
+/** Steps that accept multiple picks (stored comma-joined, server-compatible). */
+const MULTI_STEPS: ReadonlySet<QuizStepKey> = new Set(['style', 'palette', 'dressCode']);
+const MULTI_MAX = 3;
+
+function splitPicks(raw: string | number | undefined): string[] {
+  if (raw === undefined || raw === null) return [];
+  return String(raw)
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean);
+}
 
 /**
  * 5-step quiz (style, palette, dress-code, boldness slider, budget) →
@@ -50,16 +62,33 @@ export default function QuizScreen() {
   const stepKey: QuizStepKey = QUIZ_STEPS[stepIndex] ?? 'style';
   const { key, choices } = OPTIONS[stepKey];
   const isLast = stepIndex === QUIZ_STEPS.length - 1;
+  const isMulti = MULTI_STEPS.has(stepKey);
+  const picks = isMulti ? splitPicks(answers[key] as string | number | undefined) : [];
   const selected = answers[key];
 
   const choose = useCallback(
     (choice: string) => {
       setError(null);
+      if (isMulti) {
+        // Toggle within the comma-joined string (server reads joined values).
+        const current = splitPicks(answers[key] as string | number | undefined);
+        const nextPicks = current.includes(choice)
+          ? current.filter((p) => p !== choice)
+          : current.length >= MULTI_MAX
+            ? current
+            : [...current, choice];
+        if (!current.includes(choice) && current.length >= MULTI_MAX) {
+          setError(`Up to ${MULTI_MAX} — unpick one to change it.`);
+          return;
+        }
+        setAnswer(key, nextPicks.join(', ') as never);
+        return;
+      }
       const value = key === 'boldness' ? Number(choice) : choice;
       setAnswer(key, value as never);
       if (!isLast) next();
     },
-    [key, isLast, next, setAnswer],
+    [key, isLast, isMulti, next, setAnswer, answers],
   );
 
   const submit = useCallback(async () => {
@@ -112,7 +141,7 @@ export default function QuizScreen() {
           referralCode={referralCode}
         />
         <Pressable style={[styles.button, { backgroundColor: colors.primary }]} onPress={goSelfie} testID="quiz-continue">
-          <Text style={[styles.buttonText, { color: colors.onPrimary }]}>Continue to your mirror selfie</Text>
+          <Text style={[styles.buttonText, { color: colors.onPrimary }]}>Continue to your photo</Text>
         </Pressable>
         <Pressable onPress={clearResult} testID="quiz-result-back">
           <Text style={[styles.back, { color: colors.muted }]}>Back to answers</Text>
@@ -137,7 +166,7 @@ export default function QuizScreen() {
       ) : (
         <View style={styles.choices}>
           {choices.map((c) => {
-            const active = String(selected ?? '') === c;
+            const active = isMulti ? picks.includes(c) : String(selected ?? '') === c;
             return (
               <Pressable
                 key={c}
@@ -174,6 +203,21 @@ export default function QuizScreen() {
           <Pressable onPress={skipQuiz} testID="quiz-skip">
             <Text style={[styles.back, { color: colors.muted }]}>
               Skip and use a starter style
+            </Text>
+          </Pressable>
+        )}
+        {isMulti && !isLast && (
+          <Pressable
+            style={[
+              styles.button,
+              { backgroundColor: colors.primary, opacity: picks.length > 0 ? 1 : 0.5 },
+            ]}
+            onPress={next}
+            disabled={picks.length === 0}
+            testID="quiz-multi-continue"
+          >
+            <Text style={[styles.buttonText, { color: colors.onPrimary }]}>
+              Continue{picks.length > 0 ? ` (${picks.length} picked)` : ''}
             </Text>
           </Pressable>
         )}
