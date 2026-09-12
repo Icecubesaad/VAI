@@ -185,11 +185,13 @@ export default function TryOnScreen() {
   const cap = tier === 'free' ? 5 : monthlyCap;
   // Restyle builds on the finished parent render (no selection/base needed);
   // tryon/compare need garments + a base photo.
+  // Quota exhaustion is NOT a disable condition: at 0 renders the button is
+  // labeled "Get more renders" and routes to the paywall (handleGenerate).
+  // The old quota clause disabled exactly that button — a dead end.
   const canGenerate =
     phase !== 'starting' &&
     phase !== 'rendering' &&
-    (mode === 'restyle' || (selected.length > 0 && basePhotoId !== null)) &&
-    (tier !== 'free' || rendersLeft > 0);
+    (mode === 'restyle' || (selected.length > 0 && basePhotoId !== null));
 
   // Edge status poll (`action: 'status'` → server-authoritative cost/model).
   // Settles fire the REQUIRED render analytics with cost_usd (P0-3); failed
@@ -214,6 +216,7 @@ export default function TryOnScreen() {
               stopPoll();
               setPhase('idle');
               recordRenderDone();
+              usePaywall.getState().recordRenderSettled();
               if (uid) {
                 track('render_succeeded', {
                   ...renderCostPropsFromResult(uid, aTier, {
@@ -242,8 +245,15 @@ export default function TryOnScreen() {
               }
             }
           })
-          .catch(() => {
-            // Transient poll error: keep polling until timeout.
+          .catch((e: unknown) => {
+            // Transient blips keep polling until timeout — but auth failures
+            // and vanished renders are terminal: grinding to a false "Render
+            // timed out" taught users to distrust the message.
+            if (e instanceof ApiError && (e.code === 'UNAUTHENTICATED' || e.status === 404)) {
+              stopPoll();
+              setPhase('failed');
+              setError(apiErrorCopy(e).message);
+            }
           });
       }, POLL_MS);
     },
@@ -320,6 +330,7 @@ export default function TryOnScreen() {
       if (r.status === 'done') {
         setPhase('idle');
         recordRenderDone();
+        usePaywall.getState().recordRenderSettled();
         if (uid) {
           track('render_succeeded', {
             ...renderCostPropsFromResult(uid, aTier, {
@@ -453,6 +464,13 @@ export default function TryOnScreen() {
     setSharing(true);
     try {
       const res = await api.pinterestShare({ renderId: job.id, boardId: shareBoardId });
+      if (!res.url) {
+        // Server accepted but returned no pin URL — without this the sheet
+        // sat in board-picker state looking like a silent no-op and the
+        // confirm stayed enabled (double-post risk).
+        setShareError('Posted, but Pinterest did not return a link. Check your board.');
+        return;
+      }
       setSharedUrl(res.url);
       const uid = useSession.getState().userId;
       if (uid) {
@@ -612,7 +630,15 @@ export default function TryOnScreen() {
           4:5 geometry, so progress → result crossfades in place (cheap
           shared-element continuity). RenderView's own compact loading slot
           stays for its other parents; this screen owns the staged copy. */}
-      {busy && <RenderProgress testID="tryon-loading" />}
+      {busy && (
+        <RenderProgress
+          testID="tryon-loading"
+          // Pips follow the SERVER state (submitted → queued → processing) —
+          // the timer-cycled meter contradicted the "never a fake countdown"
+          // iron law the header itself cites.
+          index={phase === 'starting' ? 0 : job?.status === 'queued' ? 1 : 2}
+        />
+      )}
       <ResultReveal revealKey={job && job.status === 'done' ? job.id : null}>
         {!!job && job.status === 'done' && (
           <RenderView

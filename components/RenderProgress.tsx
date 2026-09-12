@@ -6,6 +6,10 @@ import { SkeletonHero } from './Skeleton';
 export type RenderProgressProps = {
   stages?: readonly string[];
   timingLine?: string;
+  /** State-driven stage index (from real render status). When provided the
+   *  pips and stage line follow the SERVER state instead of cycling on a
+   *  blind timer — the iron law forbids fake progress. */
+  index?: number | null;
   testID?: string;
 };
 
@@ -19,9 +23,12 @@ export type RenderProgressProps = {
 export const RenderProgress = memo(function RenderProgress({
   stages = RENDER_STAGES,
   timingLine = RENDER_TIMING_LINE,
+  index: stateIndex,
   testID = 'render-progress',
 }: RenderProgressProps): React.JSX.Element {
-  const { stage, index } = useStagedCopy(stages, true);
+  const staged = useStagedCopy(stages, stateIndex == null);
+  const index = stateIndex ?? staged.index;
+  const stage = stages[Math.min(index, stages.length - 1)] ?? stages[0] ?? '';
   return (
     <View
       testID={testID}

@@ -15,6 +15,34 @@ import { track } from '@/lib/analytics';
 import { useSession } from '@/store/session';
 import { usePaywall } from '@/store/paywall';
 import { useTaste } from '@/store/taste';
+import { mmkv } from '@/store/mmkv';
+
+/** Persisted board selection (MMKV) — deselections survive screen remounts. */
+const SELECTION_KEY = 'vai-board-selection';
+
+function readSelection(): Record<string, true> {
+  try {
+    const raw = mmkv.getString(SELECTION_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const out: Record<string, true> = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (v === true) out[k] = true;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function writeSelection(sel: Record<string, true>): void {
+  try {
+    mmkv.set(SELECTION_KEY, JSON.stringify(sel));
+  } catch {
+    // Best-effort — selection stays in state for this session.
+  }
+}
 
 /** `store/paywall` Tier ('free'|'trial'|'premium') → analytics SubTier ('free'|'premium'). */
 function toAnalyticsTier(tier: string): 'free' | 'premium' {
@@ -33,9 +61,14 @@ export default function PinterestBoards() {
   const cached = useTaste((s) => s.boards);
 
   const [boards, setBoards] = useState<PinterestBoard[]>(cached);
+  // Selection persists (MMKV): previously every mount re-selected ALL boards,
+  // silently undoing the user's deselections.
   const [selected, setSelected] = useState<Record<string, true>>(() => {
+    const saved = readSelection();
     const init: Record<string, true> = {};
-    for (const b of cached) init[b.boardId] = true;
+    for (const b of cached) {
+      if (saved[b.boardId] || !(b.boardId in saved)) init[b.boardId] = true;
+    }
     return init;
   });
   const [loading, setLoading] = useState(cached.length === 0);
@@ -60,12 +93,13 @@ export default function PinterestBoards() {
         if (!mountedRef.current) return;
         setBoards(fresh);
         useTaste.getState().setBoards(fresh);
-        // New boards default to selected; keep existing choices.
+        // New boards default to selected; persisted choices survive.
         setSelected((prev) => {
           const next: Record<string, true> = {};
           for (const b of fresh) {
             if (prev[b.boardId] || !(b.boardId in prev)) next[b.boardId] = true;
           }
+          writeSelection(next);
           return next;
         });
       } catch (e) {
@@ -85,6 +119,7 @@ export default function PinterestBoards() {
       const next = { ...s };
       if (next[id]) delete next[id];
       else next[id] = true;
+      writeSelection(next);
       return next;
     });
   }, []);

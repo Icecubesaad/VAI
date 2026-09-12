@@ -7,6 +7,7 @@ import { GarmentCard, PressScale } from '@/components';
 import type { Garment } from '@/lib/api';
 import { hapticFor } from '@/lib/haptics';
 import { useCloset, selectClosetList, selectClosetCount, FREE_CLOSET_CAP } from '@/store/closet';
+import { usePaywall } from '@/store/paywall';
 
 /**
  * Closet: grid + add bar (camera single-item only) + insights banner + Fill-my-gaps.
@@ -16,6 +17,7 @@ export default function ClosetScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const garments = useCloset(selectClosetList);
+  const tier = usePaywall((s) => s.tier);
   const count = useCloset(selectClosetCount);
   const remove = useCloset((s) => s.remove);
 
@@ -41,21 +43,22 @@ export default function ClosetScreen() {
   }, [garments]);
 
   const handleAdd = useCallback(() => {
-    // Camera capture + upload flow lives behind the garment picker (owned by UI/UX
-    // for the sheet UI); this route hands off with cap enforcement.
+    // In-app add: ?mode=app keeps this screen from mutating onboardingStep —
+    // the plain funnel route used to regress persisted step to 'selfie' and
+    // re-trap onboarded users in onboarding on every cold start.
     setAddError(null);
     void hapticFor.select();
-    if (count >= FREE_CLOSET_CAP) {
-      setAddError('Your closet is full (50 items). Upgrade to add more.');
+    if (tier === 'free' && count >= FREE_CLOSET_CAP) {
+      setAddError(`Your closet is full (${FREE_CLOSET_CAP} items on free) — upgrade to add more.`);
       return;
     }
     setAdding(true);
     try {
-      router.push('/onboarding/closet-min3');
+      router.push('/onboarding/closet-min3?mode=app');
     } finally {
       setAdding(false);
     }
-  }, [count, router]);
+  }, [count, router, tier]);
 
   const handleDelete = useCallback(
     (id: string) => {

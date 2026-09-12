@@ -6,16 +6,19 @@ import { mmkvStorage } from './mmkv';
 export const QUIZ_STEPS = ['style', 'palette', 'dressCode', 'boldness', 'budget'] as const;
 export type QuizStepKey = (typeof QUIZ_STEPS)[number];
 
+/** `starter: true` marks the local skip path — NOT server-scored DNA. */
+type StoredQuizResult = QuizResult & { starter?: boolean };
+
 interface QuizState {
   stepIndex: number;
   answers: Partial<QuizAnswers>;
   quizDone: boolean;
-  result: QuizResult | null;
+  result: StoredQuizResult | null;
 
   setAnswer: <K extends keyof QuizAnswers>(key: K, value: QuizAnswers[K]) => void;
   next: () => void;
   back: () => void;
-  setResult: (r: QuizResult) => void;
+  setResult: (r: StoredQuizResult) => void;
   /**
    * Result-screen Back: drops the DNA card back to the answer steps.
    * Answers + stepIndex + quizDone persist (MMKV) so Back never loses state.
@@ -54,6 +57,9 @@ export const useQuiz = create<QuizState>()(
             budgetBand: 'Under $50',
           },
           result: {
+            // Explicitly flagged: this renders under a distinct "starter
+            // style" headline — it must never pass as server-scored DNA.
+            starter: true,
             styleDna: [],
             labels: ['Minimal', 'Neutrals', 'Casual'],
             colorSeason: 'Undetermined',

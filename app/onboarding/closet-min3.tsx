@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { decode } from 'base64-arraybuffer';
@@ -12,6 +12,7 @@ import { compressGarmentPhoto, ImagePipelineError } from '@/lib/perf/image-pipel
 import { api, apiErrorCopy, type Garment } from '@/lib/api';
 import { useCloset, selectClosetCount, CLOSET_MIN_COUNT, FREE_CLOSET_CAP } from '@/store/closet';
 import { useSession } from '@/store/session';
+import { usePaywall } from '@/store/paywall';
 
 /**
  * Closet-min-3: camera single-item only, progress 1/3–3/3.
@@ -20,8 +21,17 @@ import { useSession } from '@/store/session';
  * closet is read-only overflow — adds are blocked behind an Upgrade-to-edit
  * banner (data is never deleted; the paywall carries the downgrade copy).
  */
+/**
+ * Funnel step (`/onboarding/closet-min3`) AND in-app add flow
+ * (`/onboarding/closet-min3?mode=app`). App mode NEVER touches the persisted
+ * onboarding step — the old behavior (a Closet-tab "Add an item" mutating
+ * onboardingStep to 'selfie') re-trapped onboarded users in the funnel on
+ * every cold start.
+ */
 export default function ClosetMin3() {
   const router = useRouter();
+  const { mode } = useLocalSearchParams<{ mode?: string }>();
+  const appMode = mode === 'app';
   const { colors } = useTheme();
   const count = useCloset(selectClosetCount);
   const upsert = useCloset((s) => s.upsert);
@@ -31,9 +41,13 @@ export default function ClosetMin3() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Read-only overflow: downgraded closets over the free cap keep everything
-  // but cannot add/edit until upgrade.
-  const overflow = count > FREE_CLOSET_CAP;
+  // Read-only overflow: free closets AT the 50-item cap (>= — the funnel used
+  // '>' and let item 51 through while the Closet tab blocked it) cannot add;
+  // premium is uncapped, mirroring the server's free-only closet cap.
+  const isFree = usePaywall.getState().tier === 'free';
+  const overflow = isFree && count >= FREE_CLOSET_CAP;
+  const atFreeCap = () => usePaywall.getState().tier === 'free' &&
+    useCloset.getState().order.length >= FREE_CLOSET_CAP;
 
   // Shared camera/library pipeline: compress → upload → auto-tag → cache.
   const processUri = useCallback(
@@ -112,9 +126,9 @@ export default function ClosetMin3() {
   const addItem = useCallback(async () => {
     setError(null);
     void hapticFor.select();
-    if (useCloset.getState().order.length > FREE_CLOSET_CAP) {
+    if (atFreeCap()) {
       setError(
-        `Your closet is over the ${FREE_CLOSET_CAP}-item free limit — extras are read-only. Upgrade to edit.`,
+        `Your closet is full (${FREE_CLOSET_CAP} items on free) — upgrade to add more.`,
       );
       return;
     }
@@ -139,9 +153,9 @@ export default function ClosetMin3() {
   const addFromLibrary = useCallback(async () => {
     setError(null);
     void hapticFor.select();
-    if (useCloset.getState().order.length > FREE_CLOSET_CAP) {
+    if (atFreeCap()) {
       setError(
-        `Your closet is over the ${FREE_CLOSET_CAP}-item free limit — extras are read-only. Upgrade to edit.`,
+        `Your closet is full (${FREE_CLOSET_CAP} items on free) — upgrade to add more.`,
       );
       return;
     }
@@ -168,18 +182,27 @@ export default function ClosetMin3() {
 
   const goFirstOutfit = useCallback(() => {
     void hapticFor.confirm();
+    if (appMode) {
+      // In-app add: return to the closet tab WITHOUT touching onboardingStep.
+      router.replace('/(tabs)/closet');
+      return;
+    }
     setStep('firstOutfit');
     router.replace('/onboarding/first-outfit');
-  }, [router, setStep]);
+  }, [appMode, router, setStep]);
 
   const done = count >= CLOSET_MIN_COUNT;
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]} testID="closet-min3">
-      <Text style={[styles.progress, { color: colors.muted }]} testID="closet-progress">
-        {Math.min(count, 3)}/3
+      {!appMode && (
+        <Text style={[styles.progress, { color: colors.muted }]} testID="closet-progress">
+          {Math.min(count, 3)}/3
+        </Text>
+      )}
+      <Text style={[styles.title, { color: colors.text }]}>
+        {appMode ? 'Add an item' : 'Photograph 3 garments'}
       </Text>
-      <Text style={[styles.title, { color: colors.text }]}>Photograph 3 garments</Text>
       <Text style={[styles.sub, { color: colors.muted }]}>
         One item at a time, flat or hanging. We tag category, colors and fabric automatically.
       </Text>
@@ -243,23 +266,35 @@ export default function ClosetMin3() {
       )}
 
       <PressScale
-        style={[styles.button, { backgroundColor: done ? colors.primary : colors.border }]}
+        style={[styles.button, { backgroundColor: appMode || done ? colors.primary : colors.border }]}
         onPress={goFirstOutfit}
-        disabled={!done}
+        disabled={!appMode && !done}
         testID="closet-continue"
       >
         <Text style={[styles.buttonText, { color: colors.onPrimary }]}>
-          {done ? 'See my first outfit' : `Add ${CLOSET_MIN_COUNT - count} more to continue`}
+          {appMode
+            ? 'Done'
+            : done
+              ? 'See my first outfit'
+              : `Add ${CLOSET_MIN_COUNT - count} more to continue`}
         </Text>
       </PressScale>
       <Pressable
         onPress={() => {
+          if (appMode) {
+            // No step regression in app mode — "Go back" used to reset the
+            // persisted funnel step to 'selfie' and re-trap onboarded users.
+            router.back();
+            return;
+          }
           setStep('selfie');
           router.replace('/onboarding/selfie-capture');
         }}
         testID="closet-back"
       >
-        <Text style={[styles.back, { color: colors.muted }]}>Go back, items are kept</Text>
+        <Text style={[styles.back, { color: colors.muted }]}>
+          {appMode ? 'Back to closet' : 'Go back, items are kept'}
+        </Text>
       </Pressable>
     </View>
   );

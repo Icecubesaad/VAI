@@ -63,6 +63,13 @@ interface PaywallState {
    * the merged tier is still `free`). User-cancelled → `{ restored: false }`.
    */
   restore: () => Promise<{ restored: boolean; status: PaywallStatus | null }>;
+  /**
+   * Local mirror bump after a render settles `done` (paid tiers only — free
+   * is owned by useQuotas.recordRenderDone). The next fetchStatus reconciles
+   * against server truth; without this the "X of 30" badge never moved
+   * in-session.
+   */
+  recordRenderSettled: () => void;
   clearPurchaseError: () => void;
   setPlacement: (p: string) => void;
   reset: () => void;
@@ -229,6 +236,13 @@ export const usePaywall = create<PaywallState>()(
         }
       },
 
+      recordRenderSettled: () =>
+        set((st) => (st.tier === 'free'
+          ? st
+          : {
+              monthlyUsed: Math.min(st.monthlyUsed + 1, st.monthlyCap),
+              rendersLeft: Math.max(st.rendersLeft - 1, 0),
+            })),
       clearPurchaseError: () => set({ purchaseError: null }),
 
       setPlacement: (lastPlacement) => set({ lastPlacement }),

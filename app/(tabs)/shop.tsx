@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { FlashList } from '@shopify/flash-list';
 import { Image } from 'expo-image';
+import * as WebBrowser from 'expo-web-browser';
 import { useQuery } from '@tanstack/react-query';
 import { useTheme } from '@/theme';
 import { api, apiErrorCopy, type ProductPick } from '@/lib/api';
@@ -23,6 +24,9 @@ export default function ShopScreen() {
   const tier = usePaywall((s) => s.tier);
   const [wishlist, setWishlist] = useState<Set<string>>(new Set());
   const [wishError, setWishError] = useState<string | null>(null);
+  const [openError, setOpenError] = useState<string | null>(null);
+  /** Heart ids touched this session — hydration must never clobber them. */
+  const touchedRef = useRef<Set<string>>(new Set());
   // Reel card entry scopes gap picks to that outfit (reel handleShop forwards
   // `outfitId`; direct tab entry has no param → unscoped picks).
   const params = useLocalSearchParams<{ outfitId?: string | string[] }>();
@@ -53,9 +57,16 @@ export default function ShopScreen() {
           .eq('user_id', userId);
         if (!cancelled && data) {
           const rows = data as Array<{ product_id: string | null }>;
-          setWishlist(
-            new Set(rows.map((r) => r.product_id).filter((x): x is string => !!x)),
-          );
+          const server = new Set(rows.map((r) => r.product_id).filter((x): x is string => !!x));
+          // Merge, not overwrite: hearts toggled while this fetch was in flight
+          // used to be silently reverted by the hydration.
+          setWishlist((local) => {
+            const merged = new Set(server);
+            for (const id of touchedRef.current) {
+              if (local.has(id)) merged.add(id);
+            }
+            return merged;
+          });
         }
       } catch {
         // Best-effort: hearts start empty, saves still write through below.
@@ -72,15 +83,21 @@ export default function ShopScreen() {
   const toggleWish = useCallback(
     (item: ProductPick) => {
       const id = item.productId;
+      if (!userId) {
+        // The optimistic heart flipped and then silently never persisted —
+        // a save that lied. Ask for sign-in first instead.
+        setWishError('Sign in to save items to your wishlist.');
+        return;
+      }
       const adding = !wishlist.has(id);
       setWishError(null);
+      touchedRef.current.add(id);
       setWishlist((s) => {
         const next = new Set(s);
         if (adding) next.add(id);
         else next.delete(id);
         return next;
       });
-      if (!userId) return;
       const revert = () => {
         setWishlist((s) => {
           const next = new Set(s);
@@ -124,9 +141,37 @@ export default function ShopScreen() {
     [wishlist, userId, tier],
   );
 
+  // THE shop CTA: open the affiliate product (server-signed URL). The old
+  // card was display-only — no onPress anywhere, affiliateUrl never opened,
+  // lib/affiliate.ts had zero callers while the footer promised commission.
+  const openProduct = useCallback((item: ProductPick) => {
+    void (async () => {
+      setOpenError(null);
+      if (!item.affiliateUrl) {
+        setOpenError('No shopping link available for this item yet.');
+        return;
+      }
+      try {
+        await WebBrowser.openBrowserAsync(item.affiliateUrl);
+      } catch {
+        try {
+          await Linking.openURL(item.affiliateUrl);
+        } catch {
+          setOpenError('Could not open the shop page. Please try again.');
+        }
+      }
+    })();
+  }, []);
+
   const renderItem = useCallback(
     ({ item }: { item: ProductPick }) => (
-      <View style={[styles.card, { backgroundColor: colors.surface }]} testID={`product-${item.productId}`}>
+      <Pressable
+        style={[styles.card, { backgroundColor: colors.surface }]}
+        onPress={() => openProduct(item)}
+        testID={`product-${item.productId}`}
+        accessibilityRole="button"
+        accessibilityLabel={`Open ${item.title} at ${item.retailer}`}
+      >
         <Image source={{ uri: item.imageUrl }} style={styles.image} contentFit="cover" />
         {!!item.badge && (
           <View style={[styles.badge, { backgroundColor: colors.primary }]} testID="gap-badge">
@@ -160,9 +205,9 @@ export default function ShopScreen() {
             </Pressable>
           </View>
         </View>
-      </View>
+      </Pressable>
     ),
-    [colors, toggleWish, wishlist],
+    [colors, toggleWish, wishlist, openProduct],
   );
 
   return (
@@ -174,6 +219,14 @@ export default function ShopScreen() {
           testID="shop-wishlist-error"
         >
           <Text style={[styles.error, { color: colors.danger }]}>{wishError}</Text>
+        </View>
+      )}
+      {!!openError && (
+        <View
+          style={[styles.errorBox, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          testID="shop-open-error"
+        >
+          <Text style={[styles.error, { color: colors.danger }]}>{openError}</Text>
         </View>
       )}
 
@@ -216,7 +269,7 @@ export default function ShopScreen() {
         <FlashList
           data={picksQuery.data}
           renderItem={renderItem}
-          keyExtractor={(p) => p.productId}
+          keyExtractor={(p, i) => p.productId || `${p.retailer}-${p.title}-${i}`}
           numColumns={2}
           contentContainerStyle={styles.grid}
           ListFooterComponent={

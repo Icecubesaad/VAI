@@ -92,7 +92,8 @@ export const OutfitCard = memo(function OutfitCard({
         <Text className="font-display text-[22px] leading-[28px] font-semibold text-ink" numberOfLines={2}>
           {resolvedTitle}
         </Text>
-        {outfitId ? (
+        {outfitId && __DEV__ ? (
+          // Internal DB id — dev-debug only; users saw a raw UUID on the hero.
           <Text className="text-[12px] leading-[16px] text-muted" testID="outfit-id">
             {outfitId}
           </Text>

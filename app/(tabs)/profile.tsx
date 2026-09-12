@@ -14,7 +14,10 @@ import { useQuery } from '@tanstack/react-query';
 import { useTheme } from '@/theme';
 import { InspirationRow, TasteCadence } from '@/components';
 import { api, apiErrorCopy } from '@/lib/api';
-import { track } from '@/lib/analytics';
+import { resetAnalytics, track } from '@/lib/analytics';
+import { setSentryUser } from '@/lib/sentry';
+import { logOutBilling } from '@/lib/billing';
+import * as Notifications from 'expo-notifications';
 import { clearAllOnLogout } from '@/lib/perf';
 import { useSession } from '@/store/session';
 import { useCloset } from '@/store/closet';
@@ -22,6 +25,8 @@ import { usePaywall } from '@/store/paywall';
 import { useQuotas } from '@/store/quotas';
 import { useReel } from '@/store/reel';
 import { useTaste } from '@/store/taste';
+import { useTastePrefs } from '@/store/taste-prefs';
+import { useQuiz } from '@/store/quiz';
 
 const PRIVACY_URL = 'https://vai.style/privacy';
 
@@ -43,6 +48,8 @@ export default function ProfileScreen() {
   const tier = usePaywall((s) => s.tier);
   const trialEndsAt = usePaywall((s) => s.trialEndsAt);
   const lifetimeUsed = useQuotas((s) => s.lifetimeUsed);
+  const monthlyUsed = usePaywall((s) => s.monthlyUsed);
+  const monthlyCap = usePaywall((s) => s.monthlyCap);
   const tasteConnected = useTaste((s) => s.connected);
   const tasteUsername = useTaste((s) => s.username);
   const boardCount = useTaste((s) => s.boards.length);
@@ -68,6 +75,23 @@ export default function ProfileScreen() {
     useQuotas.getState().reset();
     useReel.getState().reset();
     useTaste.getState().reset();
+    // Previously missed: quiz DNA, taste prefs, local notifications (the
+    // day-5 trial reminder outlived logout), PostHog identity, Sentry user,
+    // and RevenueCat attribution (purchases could land on the next signer).
+    useQuiz.getState().reset();
+    useTastePrefs.getState().reset();
+    try {
+      void Notifications.cancelAllScheduledNotificationsAsync();
+    } catch {
+      // Best-effort.
+    }
+    void resetAnalytics().catch(() => undefined);
+    try {
+      setSentryUser(null);
+    } catch {
+      // Best-effort.
+    }
+    void logOutBilling().catch(() => undefined);
     try {
       clearAllOnLogout();
     } catch {
@@ -215,7 +239,10 @@ export default function ProfileScreen() {
           </Text>
         ) : null}
         <Text style={[styles.cardText, { color: colors.text }]}>
-          Closet items: {closetCount}. Renders used: {lifetimeUsed} of 5 lifetime.
+          Closet items: {closetCount}.{' '}
+          {tier === 'free'
+            ? `Renders used: ${lifetimeUsed} of 5 lifetime.`
+            : `Renders used: ${monthlyUsed} of ${monthlyCap} this month.`}
           {scoreQuery.data ? ` Style score: ${scoreQuery.data.total}.` : ''}
         </Text>
         {!!referralCode && (

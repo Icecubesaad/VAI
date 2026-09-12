@@ -103,7 +103,7 @@ export default function FirstOutfit() {
           <Text style={[styles.why, { color: colors.muted }]} testID="first-outfit-fallback">
             {outfitQuery.isError
               ? `${apiErrorCopy(outfitQuery.error).message} Showing your starter look instead — you can retry or continue.`
-              : 'Add a few more items and we will style your first look.'}
+              : 'Starter look — not AI styled yet. Add a few more items and try again.'}
           </Text>
           {outfitQuery.isError && (
             <PressScale
@@ -126,7 +126,7 @@ export default function FirstOutfit() {
           <Text style={[styles.body, { color: colors.muted }]}>
             {outfitQuery.isError
               ? apiErrorCopy(outfitQuery.error).message
-              : 'Add a few more items and we will style your first look.'}
+              : 'Starter look — not AI styled yet. Add a few more items and try again.'}
           </Text>
           {outfitQuery.isError && (
             <PressScale

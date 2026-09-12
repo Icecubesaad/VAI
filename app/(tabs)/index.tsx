@@ -36,7 +36,14 @@ function toAnalyticsTier(tier: string): 'free' | 'premium' {
 export default function PlannerHome() {  const router = useRouter();
   const { colors } = useTheme();
   const queryClient = useQueryClient();
-  const rendersLeft = useQuotas((s) => s.rendersLeftFree());
+  // Tier-aware badge values: the free-lifetime mirror pinned premium users to
+  // "0 of 5 left — Upgrade" while their monthly pool had renders remaining.
+  const tier = usePaywall((s) => s.tier);
+  const freeLeft = useQuotas((s) => s.rendersLeftFree());
+  const monthlyUsed = usePaywall((s) => s.monthlyUsed);
+  const monthlyCap = usePaywall((s) => s.monthlyCap);
+  const rendersLeft = tier === 'free' ? freeLeft : Math.max(0, monthlyCap - monthlyUsed);
+  const quotaCap = tier === 'free' ? 5 : monthlyCap;
   const recordOutfitPlanned = useQuotas((s) => s.recordOutfitPlanned);
   const garments = useCloset(selectClosetList);
 
@@ -74,6 +81,13 @@ export default function PlannerHome() {  const router = useRouter();
   }, [queryClient, today]);
 
   const outfit: PlannedOutfit | undefined = outfitQuery.data;
+  // "Saved ✓" was sticky across outfit changes (day rollover / pull-to-refresh
+  // showed Saved for an outfit never saved) — reset when the hero id changes.
+  useEffect(() => {
+    setSaved(false);
+    setSaveError(null);
+  }, [outfit?.id]);
+
   const outfitGarments = (outfit?.garmentIds ?? [])
     .map((id) => garments.find((g) => g.id === id))
     .filter((g) => g !== undefined);
@@ -120,7 +134,13 @@ export default function PlannerHome() {  const router = useRouter();
     >
       <View style={styles.header}>
         <Text style={[styles.title, { color: colors.text }]}>Today&apos;s outfit</Text>
-        <QuotaBadge left={rendersLeft} cap={5} onPress={() => router.push('/onboarding/paywall')} />
+        <QuotaBadge
+          left={rendersLeft}
+          cap={quotaCap}
+          onPress={() => {
+            if (tier === 'free') router.push('/onboarding/paywall');
+          }}
+        />
       </View>
 
       {showPoseNudge && (
@@ -205,7 +225,9 @@ export default function PlannerHome() {  const router = useRouter();
 
           <OutfitCard
             outfitId={outfit.id}
-            garmentImages={outfitGarments.map((g) => g.cutoutUrl ?? g.imageUrl)}
+            garmentImages={outfitGarments
+              .map((g) => g.cutoutUrl ?? g.imageUrl)
+              .filter((u): u is string => typeof u === 'string' && u.length > 0)}
             whyLine={outfit.whyLine}
           />
 
@@ -246,6 +268,7 @@ export default function PlannerHome() {  const router = useRouter();
             <PressScale
               style={[styles.button, { borderColor: colors.border, borderWidth: 1 }]}
               onPress={handleSave}
+              disabled={saved}
               testID="home-save"
             >
               <Text style={[styles.buttonText, { color: colors.text }]}>

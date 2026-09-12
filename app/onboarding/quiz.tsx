@@ -128,18 +128,29 @@ export default function QuizScreen() {
     router.replace('/onboarding/selfie-capture');
   }, [router, setStep, skipWithDefaults]);
 
-  // Result state: DNA teaser card (shareable, watermarked).
+  // Result state: DNA teaser card (shareable, watermarked) — except the
+  // skip path, whose result is a local starter style, never server-scored
+  // DNA: distinct headline + no watermarked share card.
   if (result) {
     return (
       <View style={[styles.root, { backgroundColor: colors.background }]} testID="quiz-result">
-        <Text style={[styles.title, { color: colors.text }]}>Your style DNA</Text>
-        <ShareCard
-          teaser={result.teaser}
-          labels={result.labels}
-          colorSeason={result.colorSeason}
-          watermark
-          referralCode={referralCode}
-        />
+        <Text style={[styles.title, { color: colors.text }]}>
+          {result.starter ? 'Your starter style' : 'Your style DNA'}
+        </Text>
+        {!result.starter && (
+          <ShareCard
+            teaser={result.teaser}
+            labels={result.labels}
+            colorSeason={result.colorSeason}
+            watermark
+            referralCode={referralCode}
+          />
+        )}
+        {result.starter && (
+          <Text style={[styles.back, { color: colors.muted }]} testID="quiz-starter-note">
+            Not AI-scored yet — take the quiz or add clothes and your DNA refines itself.
+          </Text>
+        )}
         <Pressable style={[styles.button, { backgroundColor: colors.primary }]} onPress={goSelfie} testID="quiz-continue">
           <Text style={[styles.buttonText, { color: colors.onPrimary }]}>Continue to your photo</Text>
         </Pressable>

@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { ViewToken } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { FlashList } from '@shopify/flash-list';
 import NetInfo from '@react-native-community/netinfo';
 import { useTheme } from '@/theme';
@@ -184,6 +184,9 @@ export default function ReelScreen() {
   const quotaCap = usePaywall((s) => (s.tier === 'free' ? s.lifetimeCap : s.monthlyCap));
 
   const [poses, setPoses] = useState<Record<ReelPose, boolean> | null>(null);
+  /** Pose-status fetch failed — a retry state, NOT "all poses missing" (the
+   *  old catch mapped a transient error to the pose-gate, locking the reel). */
+  const [poseError, setPoseError] = useState(false);
   const [listH, setListH] = useState<number | null>(null);
   const [wearError, setWearError] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
@@ -245,9 +248,21 @@ export default function ReelScreen() {
 
   const load = useCallback(() => {
     void ensureWeek(weekOf).catch(() => undefined);
-    void fetchPoseStatus().then(setPoses, () => setPoses({ front: false, step: false, detail: false }));
   }, [ensureWeek, weekOf]);
   useEffect(load, [load]);
+
+  const refetchPoses = useCallback(() => {
+    setPoseError(false);
+    void fetchPoseStatus().then(
+      (p) => setPoses(p),
+      () => setPoseError(true),
+    );
+  }, []);
+  // Pose status is fetched once on mount — completing the pose pack and
+  // returning to this (still-mounted) tab left stale all-false poses and a
+  // dead-end loop. Refetch on every focus instead.
+  useFocusEffect(refetchPoses);
+
 
   // Open attribution (once per mount) + snapshot whether the drop was already
   // cached (drives the TTI `from_cache` budget split).
@@ -268,6 +283,24 @@ export default function ReelScreen() {
 
   const cards = drop && cachedWeek === weekOf ? drop.cards : null;
   const pageH = listH ?? winH;
+
+  // Pending drop cards (imageUrl "") render blank until the server finishes.
+  // Poll every 8s while anything is pending (5-min cap) — previously the
+  // cards stayed black until a manual refresh or app restart.
+  useEffect(() => {
+    if (!cards || cards.length === 0) return;
+    if (!cards.some((c) => c.imageUrl.length === 0)) return;
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      if (Date.now() - startedAt > 5 * 60 * 1000) {
+        clearInterval(timer);
+        return;
+      }
+      if (!onlineRef.current) return;
+      void refreshWeek(weekOf).catch(() => undefined);
+    }, 8_000);
+    return () => clearInterval(timer);
+  }, [cards, refreshWeek, weekOf]);
 
   // Scroll-path refs mirror the drop (no render-body assignment — concurrent
   // unsafe). The adapter is rebuilt per drop, not per viewability event, so
@@ -534,6 +567,7 @@ export default function ReelScreen() {
   // of a generic fetch error. weekly_drop_started carries the
   // server-authoritative cost sum (REQUIRED — pending estimates excluded).
   const handleStyleWeek = useCallback(() => {
+    if (fetching) return; // double-tap = two reel-drops = 7 renders each
     if (!onlineRef.current) {
       setBanner(COPY_REEL_OFFLINE_REGENERATE);
       return;
@@ -567,7 +601,7 @@ export default function ReelScreen() {
         });
       }
     })();
-  }, [styleMyWeek, weekOf, poses, router]);
+  }, [styleMyWeek, weekOf, poses, router, fetching]);
 
   const handleUpgrade = useCallback(() => {
     router.push('/onboarding/paywall');
@@ -659,6 +693,13 @@ export default function ReelScreen() {
         <View style={styles.list} testID="reel-loading">
           <ReelSkeleton />
         </View>
+      ) : poseError ? (
+        <View style={styles.body} testID="reel-pose-error">
+          <ErrorView
+            message="Could not check your pose pack. Check your connection and try again."
+            onRetry={refetchPoses}
+          />
+        </View>
       ) : missing.length > 0 ? (
         <View style={styles.body} testID="reel-pose-empty">
           <EmptyState
@@ -679,6 +720,8 @@ export default function ReelScreen() {
             body="Fresh looks land every Monday. Style your week now — seven outfits, three poses."
             actionTitle={fetching ? 'Styling…' : 'Style my week'}
             onAction={handleStyleWeek}
+            actionLoading={fetching}
+            actionDisabled={fetching}
           />
           {!!fetchError && <Text style={[styles.loadingText, { color: colors.danger }]}>{fetchError}</Text>}
         </View>
