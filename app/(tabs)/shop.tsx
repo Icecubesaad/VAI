@@ -165,49 +165,59 @@ export default function ShopScreen() {
 
   const renderItem = useCallback(
     ({ item }: { item: ProductPick }) => (
-      <Pressable
-        style={[styles.card, { backgroundColor: colors.surface }]}
-        onPress={() => openProduct(item)}
-        testID={`product-${item.productId}`}
-        accessibilityRole="button"
-        accessibilityLabel={`Open ${item.title} at ${item.retailer}`}
-      >
-        <Image source={{ uri: item.imageUrl }} style={styles.image} contentFit="cover" />
-        {!!item.badge && (
-          <View style={[styles.badge, { backgroundColor: colors.primary }]} testID="gap-badge">
-            <Text style={[styles.badgeText, { color: colors.onPrimary }]}>{item.badge}</Text>
-          </View>
-        )}
-        <View style={styles.meta}>
-          <Text style={[styles.title, { color: colors.text }]} numberOfLines={2}>
-            {item.title}
-          </Text>
-          <Text style={[styles.sub, { color: colors.muted }]}>{item.retailer}</Text>
-          {item.rating != null ? (
-            <Text style={[styles.sub, { color: colors.muted }]}>
-              Rated {item.rating.toFixed(1)} out of 5
+      // Card pressable and the wishlist heart are SIBLINGS (a Pressable was
+      // nested inside the card Pressable → invalid <button>-in-<button> DOM).
+      <View style={styles.cardWrap}>
+        <Pressable
+          style={[styles.card, { backgroundColor: colors.surface }]}
+          onPress={() => openProduct(item)}
+          testID={`product-${item.productId}`}
+          accessibilityRole="button"
+          accessibilityLabel={`Open ${item.title} at ${item.retailer}`}
+        >
+          <Image source={{ uri: item.imageUrl }} style={styles.image} contentFit="cover" />
+          {!!item.badge && (
+            <View style={[styles.badge, { backgroundColor: colors.primary }]} testID="gap-badge">
+              <Text style={[styles.badgeText, { color: colors.onPrimary }]}>{item.badge}</Text>
+            </View>
+          )}
+          <View style={styles.meta}>
+            <Text style={[styles.title, { color: colors.text }]} numberOfLines={2}>
+              {item.title}
             </Text>
-          ) : null}
-          <Text style={[styles.reason, { color: colors.muted }]} numberOfLines={2}>
-            {item.valueAddReason}
-          </Text>
-          <View style={styles.row}>
-            {item.price != null ? (
-              <Text style={[styles.price, { color: colors.text }]}>${item.price.toFixed(2)}</Text>
-            ) : null}
-            <Pressable
-              onPress={() => toggleWish(item)}
-              hitSlop={12}
-              testID={`wish-${item.productId}`}
-              accessibilityLabel={wishlist.has(item.productId) ? 'Remove from wishlist' : 'Save to wishlist'}
-            >
-              <Text style={[styles.heart, { color: colors.primary }]}>
-                {wishlist.has(item.productId) ? '♥' : '♡'}
+            {!!item.retailer && (
+              <Text style={[styles.sub, { color: colors.muted }]}>{item.retailer}</Text>
+            )}
+            {item.rating != null ? (
+              <Text style={[styles.sub, { color: colors.muted }]}>
+                Rated {item.rating.toFixed(1)} out of 5
               </Text>
-            </Pressable>
+            ) : null}
+            {!!item.valueAddReason && (
+              <Text style={[styles.reason, { color: colors.muted }]} numberOfLines={2}>
+                {item.valueAddReason}
+              </Text>
+            )}
+            <View style={styles.row}>
+              {item.price != null ? (
+                <Text style={[styles.price, { color: colors.text }]}>${item.price.toFixed(2)}</Text>
+              ) : null}
+            </View>
           </View>
-        </View>
-      </Pressable>
+        </Pressable>
+        <Pressable
+          onPress={() => toggleWish(item)}
+          hitSlop={12}
+          style={styles.heartBtn}
+          testID={`wish-${item.productId}`}
+          accessibilityRole="button"
+          accessibilityLabel={wishlist.has(item.productId) ? 'Remove from wishlist' : 'Save to wishlist'}
+        >
+          <Text style={[styles.heart, { color: colors.primary }]}>
+            {wishlist.has(item.productId) ? '♥' : '♡'}
+          </Text>
+        </Pressable>
+      </View>
     ),
     [colors, toggleWish, wishlist, openProduct],
   );
@@ -290,7 +300,9 @@ const styles = StyleSheet.create({
   root: { flex: 1, padding: 16 },
   header: { fontSize: 28, fontWeight: '700', fontFamily: 'Georgia', marginBottom: 12 },
   grid: { paddingBottom: 24 },
-  card: { flex: 1, borderRadius: 14, overflow: 'hidden', margin: 6 },
+  cardWrap: { flex: 1, margin: 6 },
+  heartBtn: { position: 'absolute', right: 14, bottom: 44 },
+  card: { borderRadius: 14, overflow: 'hidden', backgroundColor: '#fff' },
   image: { width: '100%', aspectRatio: 3 / 4, backgroundColor: '#EDE8E0' },
   badge: { position: 'absolute', top: 8, left: 8, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
   badgeText: { fontSize: 11, fontWeight: '700' },

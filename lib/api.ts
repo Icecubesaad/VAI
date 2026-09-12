@@ -344,6 +344,13 @@ async function mapFnError(err: unknown, response?: Response): Promise<ApiError> 
       return new ApiError(code, 'You are out of renders.', status);
     case 'VALIDATION':
       return new ApiError(code, serverMessage ?? 'Something went wrong. Please try again.', status);
+    case 'SERVER':
+      // 503s carry deliberate, user-safe copy (e.g. render_queue_unavailable)
+      // — surface it instead of flattening to the generic line.
+      if (status === 503 && serverMessage) {
+        return new ApiError(code, serverMessage, status);
+      }
+      return new ApiError(code, serverMessage ?? 'Something went wrong. Please try again.', status);
     default:
       return new ApiError(code, serverMessage ?? 'Something went wrong. Please try again.', status);
   }
@@ -708,11 +715,50 @@ function mapPaywallStatus(res: unknown): PaywallStatus {
   };
 }
 
+/** `quiz-score` response (snake) → `QuizResult`. `teaser` arrives as an
+ *  OBJECT ({archetype, labels, color_season_initial}) — rendering it directly
+ *  crashes React ("Objects are not valid as a React child"); flatten to a line. */
+function mapQuizResult(raw: unknown): QuizResult {
+  const r = isRecord(raw) ? raw : {};
+  const teaserRaw = r['teaser'];
+  let teaser = '';
+  if (typeof teaserRaw === 'string') teaser = teaserRaw;
+  else if (isRecord(teaserRaw)) {
+    const archetype = str(teaserRaw['archetype']);
+    const tl = strArray(teaserRaw['labels']);
+    teaser = [archetype, tl.join(' · ')].filter(Boolean).join(' — ');
+  }
+  return {
+    styleDna: Array.isArray(r['style_dna'])
+      ? (r['style_dna'] as unknown[]).filter((n): n is number => typeof n === 'number')
+      : [],
+    labels: strArray(r['labels']),
+    colorSeason: pickStr(r['color_season'], r['colorSeason']) ?? '',
+    teaser,
+    fullReport: pickStr(r['full_report'], r['fullReport']),
+  };
+}
+
 // ------------------------------------------------------------ wrappers ---
 
 export const api = {
-  scoreQuiz: (body: { answers: QuizAnswers; selfieUrl?: string }) =>
-    invoke<typeof body, QuizResult>(FN.quizScore, body),
+  /** Wire is snake_case (`quiz-score` validates everyday_style/dress_code/
+   *  budget_band) — the camelCase client shape is translated here. The old
+   *  passthrough sent camelCase raw and every real quiz submit 400'd. */
+  scoreQuiz: (body: { answers: QuizAnswers; selfieUrl?: string }) => {
+    const a = body.answers;
+    const req: Record<string, unknown> = {
+      answers: {
+        everyday_style: a.everydayStyle,
+        palette: a.palette,
+        dress_code: a.dressCode,
+        boldness: a.boldness,
+        budget_band: a.budgetBand,
+      },
+    };
+    if (body.selfieUrl) req['selfie_url'] = body.selfieUrl;
+    return invoke<Record<string, unknown>, unknown>(FN.quizScore, req).then(mapQuizResult);
+  },
 
   /**
    * Canonical request `{ image_url, source }`; nested `{ garment, tags }`

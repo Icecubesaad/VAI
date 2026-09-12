@@ -8,6 +8,10 @@
  * @type {import('tailwindcss').Config}
  */
 module.exports = {
+  // Class-based dark mode: v1 is light-only, and NativeWind's manual color
+  // scheme API throws under the default 'media' strategy once global.css
+  // loads ("Cannot manually set color scheme...").
+  darkMode: 'class',
   // NOTE: update globs if you add new className-containing dirs.
   content: [
     './app/**/*.{js,jsx,ts,tsx}',

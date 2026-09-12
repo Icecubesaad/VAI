@@ -372,6 +372,16 @@ export default function SelfieCapture() {
             {error}
           </Text>
         )}
+        <Pressable
+          onPress={() => {
+            if (busy === 'capture') return;
+            setStep('quiz');
+            router.replace('/onboarding/quiz');
+          }}
+          testID="selfie-web-back"
+        >
+          <Text style={[styles.consent, { color: colors.muted }]}>Back to quiz</Text>
+        </Pressable>
       </View>
     );
   }

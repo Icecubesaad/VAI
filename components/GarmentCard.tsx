@@ -53,7 +53,10 @@ export const GarmentCard = memo(function GarmentCard({
     garment.wearCount ? `, worn ${garment.wearCount} times` : ''
   }`;
 
+  // Delete is a SIBLING of the card pressable (was nested inside → invalid
+  // <button>-in-<button> DOM on web + React warnings).
   return (
+    <View className="relative">
     <PressScale
       testID={testID ?? 'garment-card'}
       accessibilityRole="button"
@@ -94,21 +97,22 @@ export const GarmentCard = memo(function GarmentCard({
           {cpw ? <Badge label={`${cpw}/wear`} tone="sage" /> : null}
         </View>
       </View>
-      {onDelete ? (
-        <PressScale
-          testID={testID ? `${testID}-delete` : 'garment-delete'}
-          accessibilityRole="button"
-          accessibilityLabel={`Remove ${garment.category}`}
-          accessibilityHint="Removes this item from your closet"
-          hitSlop={12}
-          onPress={onDelete}
-          className="absolute right-sm top-sm items-center justify-center rounded-pill bg-black/55 px-sm py-[4px] active:opacity-70"
-        >
-          <Text className="text-[12px] leading-[16px] font-bold text-white" aria-hidden>
-            ✕
-          </Text>
-        </PressScale>
-      ) : null}
     </PressScale>
+    {onDelete ? (
+      <PressScale
+        testID={testID ? `${testID}-delete` : 'garment-delete'}
+        accessibilityRole="button"
+        accessibilityLabel={`Remove ${garment.category}`}
+        accessibilityHint="Removes this item from your closet"
+        hitSlop={12}
+        onPress={onDelete}
+        className="absolute right-sm top-sm items-center justify-center rounded-pill bg-black/55 px-sm py-[4px] active:opacity-70"
+      >
+        <Text className="text-[12px] leading-[16px] font-bold text-white" aria-hidden>
+          ✕
+        </Text>
+      </PressScale>
+    ) : null}
+    </View>
   );
 });

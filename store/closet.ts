@@ -60,5 +60,17 @@ export const useCloset = create<ClosetState>()(
 
 /** Selectors (avoid re-render churn on large closets). */
 export const selectClosetCount = (s: ClosetState) => s.order.length;
-export const selectClosetList = (s: ClosetState): Garment[] =>
-  s.order.map((id) => s.items[id]).filter((g): g is Garment => g !== undefined);
+
+// Memoized: the selector MUST return a referentially stable snapshot —
+// zustand v5 + React 19's useSyncExternalStore throws "Maximum update depth
+// exceeded" when the selector allocates a fresh array on every getSnapshot
+// (first-outfit crashed on mount because of this).
+let listCache: { order: string[]; items: Record<string, Garment>; result: Garment[] } | null = null;
+export const selectClosetList = (s: ClosetState): Garment[] => {
+  if (listCache && listCache.order === s.order && listCache.items === s.items) {
+    return listCache.result;
+  }
+  const result = s.order.map((id) => s.items[id]).filter((g): g is Garment => g !== undefined);
+  listCache = { order: s.order, items: s.items, result };
+  return result;
+};

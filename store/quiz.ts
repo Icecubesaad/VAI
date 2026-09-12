@@ -72,9 +72,25 @@ export const useQuiz = create<QuizState>()(
     {
       name: 'vai-quiz',
       storage: createJSONStorage(() => mmkvStorage),
-      // v1: identity migrate — existing persisted state is kept as-is.
       version: 1,
-      migrate: (persisted) => persisted as never,
+      // v1: sanitize results persisted by the pre-mapper client (raw server
+      // shape — teaser as an OBJECT crash-looped the result screen on boot).
+      migrate: (persisted) => {
+        const st = persisted as never as { result?: { teaser?: unknown } | null };
+        const t = st?.result?.teaser;
+        if (t !== undefined && t !== null && typeof t !== 'string') {
+          const o = t as { archetype?: unknown; labels?: unknown };
+          const archetype = typeof o.archetype === 'string' ? o.archetype : '';
+          const labels = Array.isArray(o.labels)
+            ? o.labels.filter((x): x is string => typeof x === 'string')
+            : [];
+          st.result = {
+            ...st.result,
+            teaser: [archetype, labels.join(' · ')].filter(Boolean).join(' — '),
+          } as never;
+        }
+        return persisted;
+      },
     },
   ),
 );

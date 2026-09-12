@@ -5,8 +5,14 @@
 
 export const GEMINI_FLASH_IMAGE = "gemini-3.1-flash-image";
 export const GEMINI_PRO_IMAGE = "gemini-3-pro-image";
-/** Overridable via env; README pins "Gemini Flash" for text/vision reasoning. */
-export const geminiTextModel = (): string => Deno.env.get("GEMINI_TEXT_MODEL") ?? "gemini-3-flash";
+/**
+ * Overridable via env; README pins "Gemini Flash" for text/vision reasoning.
+ * Default `gemini-2.5-flash`: stable AND on the Gemini API free tier (the
+ * founder runs without billing attached — gemini-3-flash is a PREVIEW model
+ * with billing enabled and 402s on free keys; 2.5-flash does multimodal
+ * image INPUT free, which auto-tag needs).
+ */
+export const geminiTextModel = (): string => Deno.env.get("GEMINI_TEXT_MODEL") ?? "gemini-2.5-flash";
 
 export const GEMINI_STD_COST_USD = 0.067;
 

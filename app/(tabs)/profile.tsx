@@ -80,11 +80,9 @@ export default function ProfileScreen() {
     // and RevenueCat attribution (purchases could land on the next signer).
     useQuiz.getState().reset();
     useTastePrefs.getState().reset();
-    try {
-      void Notifications.cancelAllScheduledNotificationsAsync();
-    } catch {
-      // Best-effort.
-    }
+    // Web has no native notifications module — the async rejection escapes a
+    // sync try/catch (void promise), so attach .catch instead.
+    Notifications.cancelAllScheduledNotificationsAsync().catch(() => undefined);
     void resetAnalytics().catch(() => undefined);
     try {
       setSentryUser(null);

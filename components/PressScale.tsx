@@ -8,8 +8,15 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { MOTION, useReducedMotion } from '../lib/motion';
+// NativeWind only maps `className` onto component types it knows. The
+// animated wrapper is an anonymous type to css-interop, so utilities passed
+// to <PressScale className> silently no-op'd (cadence segments rendered
+// unflexed, card pills unstyled). Registering it makes className land.
+import { cssInterop } from 'nativewind';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+cssInterop(AnimatedPressable, { className: 'style' });
 
 export type PressScaleProps = Omit<PressableProps, 'style'> & {
   /** Pressed scale. 0.97 for buttons, 0.98 for pills/dense chips. */
