@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -12,9 +11,10 @@ import { useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { useTheme } from '@/theme';
-import { OutfitCard, QuotaBadge } from '@/components';
+import { OutfitCard, PressScale, QuotaBadge, SkeletonHero } from '@/components';
 import { api, apiErrorCopy, type PlannedOutfit } from '@/lib/api';
 import { track } from '@/lib/analytics';
+import { hapticFor } from '@/lib/haptics';
 import { tasteSeedPack } from '@/lib/ai/taste-seeds';
 import { useSession } from '@/store/session';
 import { usePaywall } from '@/store/paywall';
@@ -104,6 +104,7 @@ export default function PlannerHome() {  const router = useRouter();
     try {
       recordOutfitPlanned();
       setSaved(true);
+      void hapticFor.done();
     } catch {
       setSaveError('Could not save this outfit. Please try again.');
     }
@@ -123,7 +124,9 @@ export default function PlannerHome() {  const router = useRouter();
 
       {outfitQuery.isPending ? (
         <View style={styles.state} testID="home-loading">
-          <ActivityIndicator size="large" />
+          <View style={{ width: '100%' }}>
+            <SkeletonHero />
+          </View>
           <Text style={[styles.stateText, { color: colors.muted }]}>Planning your outfit…</Text>
         </View>
       ) : outfitQuery.isError ? (
@@ -182,32 +185,36 @@ export default function PlannerHome() {  const router = useRouter();
           </Text>
 
           <View style={styles.actions}>
-            <Pressable
+            <PressScale
               style={[styles.button, { backgroundColor: colors.primary }]}
               // Forward the REAL plan-day outfit row (P0-1): the try-on
               // screen sends this id only when its garment set still equals
               // the selection — otherwise it falls back to garment_refs.
-              onPress={() =>
+              onPress={() => {
+                void hapticFor.select();
                 router.push({
                   pathname: '/(tabs)/tryon',
                   params: {
                     outfitId: outfit.id,
                     garmentIds: outfit.garmentIds.join(','),
                   },
-                })
-              }
+                });
+              }}
               testID="home-tryon"
             >
               <Text style={[styles.buttonText, { color: colors.onPrimary }]}>Try on</Text>
-            </Pressable>
-            <Pressable
+            </PressScale>
+            <PressScale
               style={[styles.button, { borderColor: colors.border, borderWidth: 1 }]}
-              onPress={() => router.push('/(tabs)/tryon')}
+              onPress={() => {
+                void hapticFor.select();
+                router.push('/(tabs)/tryon');
+              }}
               testID="home-restyle"
             >
               <Text style={[styles.buttonText, { color: colors.text }]}>Restyle</Text>
-            </Pressable>
-            <Pressable
+            </PressScale>
+            <PressScale
               style={[styles.button, { borderColor: colors.border, borderWidth: 1 }]}
               onPress={handleSave}
               testID="home-save"
@@ -215,10 +222,12 @@ export default function PlannerHome() {  const router = useRouter();
               <Text style={[styles.buttonText, { color: colors.text }]}>
                 {saved ? 'Saved ✓' : 'Save'}
               </Text>
-            </Pressable>
+            </PressScale>
           </View>
           {!!saveError && (
-            <Text style={[styles.error, { color: colors.danger }]}>{saveError}</Text>
+            <View style={[styles.errorBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Text style={[styles.error, { color: colors.danger }]}>{saveError}</Text>
+            </View>
           )}
 
           {/* Owned-garment thumbnails for transparency */}
@@ -243,7 +252,7 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   content: { padding: 16, paddingBottom: 32 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
-  title: { fontSize: 24, fontWeight: '700' },
+  title: { fontSize: 28, fontWeight: '700', fontFamily: 'Georgia' },
   chips: { flexDirection: 'row', gap: 8, marginBottom: 12, flexWrap: 'wrap' },
   chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
   chipText: { fontSize: 13 },
@@ -251,7 +260,8 @@ const styles = StyleSheet.create({
   actions: { flexDirection: 'row', gap: 10, marginTop: 16 },
   button: { flex: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
   buttonText: { fontSize: 15, fontWeight: '600' },
-  error: { fontSize: 13, marginTop: 8 },
+  error: { fontSize: 13, lineHeight: 18 },
+  errorBox: { borderWidth: 1, borderRadius: 12, padding: 12, marginTop: 8 },
   thumbs: { flexDirection: 'row', gap: 8, marginTop: 16, flexWrap: 'wrap' },
   thumb: { width: 72, height: 72, borderRadius: 12, backgroundColor: '#EDE8E0' },
   state: { alignItems: 'center', paddingVertical: 48, gap: 8 },

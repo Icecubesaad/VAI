@@ -53,7 +53,7 @@ export const OutfitCard = memo(function OutfitCard({
   const resolvedTitle = title ?? "Today's outfit";
   const extraImages = hero ? (garmentImages ?? []).slice(1, 4) : [];
   return (
-    <Card testID={testID} padded={false} accessible accessibilityLabel={`Outfit: ${resolvedTitle}`}>
+    <Card testID={testID} padded={false} accessible accessibilityLabel={`Outfit: ${resolvedTitle}`} className="overflow-hidden">
       <View className="aspect-[4/5] w-full bg-paperDeep">
         {resolvedImage ? (
           <Image

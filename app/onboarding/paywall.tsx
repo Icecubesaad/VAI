@@ -96,7 +96,7 @@ export default function PaywallScreen() {
       contentContainerStyle={styles.content}
       testID="paywall-screen"
     >
-      <Text style={[styles.kicker, { color: colors.muted }]}>You&apos;ve seen the magic — keep it</Text>
+      <Text style={[styles.kicker, { color: colors.muted }]}>You have seen the magic. Keep it.</Text>
       <Text style={[styles.title, { color: colors.text }]}>Your closet, styled daily</Text>
 
       {fetching ? (
@@ -167,7 +167,7 @@ export default function PaywallScreen() {
               accessibilityLabel="Yearly, $39.99 per year, best value"
               testID="paywall-plan-yearly"
             >
-              <Text style={[styles.planTitle, { color: colors.text }]}>Yearly · best value</Text>
+              <Text style={[styles.planTitle, { color: colors.text }]}>Yearly, best value</Text>
               <Text style={[styles.planPrice, { color: colors.text }]}>$39.99/yr</Text>
               <Text style={[styles.plans, { color: colors.muted }]}>$3.33 per month</Text>
             </Pressable>
@@ -215,7 +215,7 @@ export default function PaywallScreen() {
         </Pressable>
         {tier === 'free' && (
           <Pressable onPress={dismiss} testID="paywall-dismiss">
-            <Text style={[styles.link, { color: colors.muted }]}>Not now</Text>
+            <Text style={[styles.link, { color: colors.muted }]}>Continue with free renders</Text>
           </Pressable>
         )}
       </View>
@@ -226,8 +226,8 @@ export default function PaywallScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   content: { padding: 24, paddingTop: 64, paddingBottom: 32 },
-  kicker: { fontSize: 13, fontWeight: '700', textTransform: 'uppercase' },
-  title: { fontSize: 28, fontWeight: '800', marginTop: 8 },
+  kicker: { fontSize: 13, fontWeight: '700' },
+  title: { fontSize: 30, fontWeight: '800', fontFamily: 'Georgia', marginTop: 8 },
   counter: { borderRadius: 14, padding: 16, marginTop: 20, gap: 6 },
   counterText: { fontSize: 18, fontWeight: '800' },
   counterSub: { fontSize: 13, lineHeight: 18 },
@@ -235,7 +235,7 @@ const styles = StyleSheet.create({
   perk: { fontSize: 15 },
   plansRow: { flexDirection: 'row', gap: 10, marginTop: 20 },
   planCard: { flex: 1, borderRadius: 12, padding: 14, gap: 2 },
-  planTitle: { fontSize: 13, fontWeight: '700', textTransform: 'uppercase' },
+  planTitle: { fontSize: 13, fontWeight: '700' },
   planPrice: { fontSize: 17, fontWeight: '800' },
   button: { borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 24 },
   buttonText: { fontSize: 16, fontWeight: '700' },

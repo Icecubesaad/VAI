@@ -215,8 +215,8 @@ export default function ProfileScreen() {
           </Text>
         ) : null}
         <Text style={[styles.cardText, { color: colors.text }]}>
-          Closet items: {closetCount} · Renders used: {lifetimeUsed} of 5 lifetime
-          {scoreQuery.data ? ` · Style score: ${scoreQuery.data.total}` : ''}
+          Closet items: {closetCount}. Renders used: {lifetimeUsed} of 5 lifetime.
+          {scoreQuery.data ? ` Style score: ${scoreQuery.data.total}.` : ''}
         </Text>
         {!!referralCode && (
           <Text style={[styles.cardText, { color: colors.muted }]}>
@@ -352,7 +352,7 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   content: { padding: 16, paddingBottom: 32 },
-  header: { fontSize: 24, fontWeight: '700' },
+  header: { fontSize: 28, fontWeight: '700', fontFamily: 'Georgia' },
   email: { fontSize: 13, marginTop: 2 },
   card: { borderRadius: 14, padding: 14, marginTop: 12, gap: 6 },
   cardTitle: { fontSize: 16, fontWeight: '700' },
@@ -372,7 +372,7 @@ const styles = StyleSheet.create({
   rowSub: { fontSize: 13 },
   chev: { fontSize: 20 },
   tasteRow: { marginTop: 10 },
-  dangerTitle: { fontSize: 13, fontWeight: '700', marginTop: 20, textTransform: 'uppercase' },
+  dangerTitle: { fontSize: 13, fontWeight: '700', marginTop: 20 },
   error: { fontSize: 13, marginTop: 8 },
   done: { fontSize: 13, marginTop: 8 },
   logout: { borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 16 },

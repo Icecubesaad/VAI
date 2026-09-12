@@ -21,6 +21,7 @@ module.exports = {
         paper: '#FAF8F5',
         paperDeep: '#F2EDE5',
         card: '#FFFFFF',
+        well: '#EDE8E0',
         ink: '#1A1A1A',
         inkSoft: '#57504A',
         muted: '#8A8179',
@@ -29,6 +30,8 @@ module.exports = {
         terracotta: '#C65D3B',
         terracottaDeep: '#A34A2C',
         terracottaWash: '#F8E7DC',
+        oxblood: '#6E2233',
+        oxbloodWash: '#F5E4E6',
         sage: '#66855F',
         sageDeep: '#49663F',
         sageWash: '#E4EBE0',
@@ -39,6 +42,7 @@ module.exports = {
         warn: '#A87E2A',
         appleBlack: '#000000',
         applePaper: '#FFFFFF',
+        scrim: 'rgba(26, 26, 26, 0.45)',
       },
       spacing: {
         '2xs': '2px',
@@ -46,6 +50,7 @@ module.exports = {
         sm: '8px',
         md: '12px',
         lg: '16px',
+        gutter: '20px',
         xl: '24px',
         '2xl': '32px',
         '3xl': '48px',
@@ -53,6 +58,7 @@ module.exports = {
       },
       borderRadius: {
         sm: '8px',
+        media: '10px',
         md: '12px',
         lg: '16px',
         xl: '24px',
@@ -60,10 +66,12 @@ module.exports = {
       },
       boxShadow: {
         card: '0 4px 12px rgba(58, 46, 36, 0.08)',
+        lift: '0 8px 16px rgba(58, 46, 36, 0.12)',
         pop: '0 12px 24px rgba(58, 46, 36, 0.18)',
       },
       fontFamily: {
         display: ['Georgia', 'serif'],
+        editorial: ['Georgia', 'serif'],
         sans: ['System'],
       },
     },

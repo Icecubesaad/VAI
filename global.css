@@ -1,3 +1,13 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/*
+ * VAI editorial web polish (web-only: React Native never parses this file).
+ * Headline balance for display moments — keeps ragged-right magazine
+ * headlines from stranding single words ("orphans") on Expo web.
+ */
+.vai-display {
+  text-wrap: balance;
+  -webkit-font-smoothing: antialiased;
+}

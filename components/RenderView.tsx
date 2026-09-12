@@ -69,17 +69,17 @@ export const RenderView = memo(function RenderView({
         className="items-center gap-y-sm rounded-xl border border-line bg-card px-xl py-2xl"
       >
         <Text className="text-center font-display text-[22px] leading-[28px] font-semibold text-ink">
-          Couldn&apos;t create this try-on
+          This try-on did not work
         </Text>
         <Text className="text-center text-[15px] leading-[22px] text-inkSoft">
-          {error ?? 'Render failed. Failed renders are free — please try again.'}
+          {error ?? 'The render failed, so it cost nothing. Try again when you are ready.'}
         </Text>
         {onRetry ? (
           <View className="mt-sm w-full">
             <Pressable
               testID="render-retry"
               accessibilityRole="button"
-              accessibilityLabel="Retry render, free of charge"
+              accessibilityLabel="Try again, free of charge"
               accessibilityState={{ busy: retrying }}
               disabled={retrying}
               onPress={onRetry}
@@ -90,7 +90,7 @@ export const RenderView = memo(function RenderView({
               {retrying ? (
                 <ActivityIndicator size="small" />
               ) : (
-                <Text className="text-[15px] font-semibold text-ink">Retry (free)</Text>
+                <Text className="text-[15px] font-semibold text-ink">Try again (free)</Text>
               )}
             </Pressable>
           </View>
@@ -133,7 +133,7 @@ export const RenderView = memo(function RenderView({
                   accessibilityLabel="Your base photo"
                 />
               </View>
-              <Text className="text-center text-[12px] font-semibold uppercase tracking-widest text-muted">
+              <Text className="text-center text-[12px] font-semibold text-muted">
                 You
               </Text>
             </View>
@@ -148,13 +148,13 @@ export const RenderView = memo(function RenderView({
                 />
                 {stamp}
               </View>
-              <Text className="text-center text-[12px] font-semibold uppercase tracking-widest text-muted">
+              <Text className="text-center text-[12px] font-semibold text-muted">
                 Try-on
               </Text>
             </View>
           </View>
         ) : (
-          <View className="aspect-[4/5] w-full overflow-hidden rounded-lg bg-paperDeep">
+          <View className="aspect-[4/5] w-full overflow-hidden rounded-xl border border-lineOnCard bg-paperDeep shadow-card">
             <Image
               source={{ uri: outputUrl }}
               style={{ width: '100%', height: '100%' }}
@@ -165,7 +165,7 @@ export const RenderView = memo(function RenderView({
             {stamp}
           </View>
         )}
-        <Text testID="render-caption" className="text-center text-[13px] leading-[18px] text-inkSoft">
+        <Text testID="render-caption" className="text-center text-[12px] leading-[16px] text-muted">
           {AI_DISCLOSURE}
         </Text>
         {quotaLeft != null ? (
@@ -206,7 +206,7 @@ export const RenderView = memo(function RenderView({
       accessible
       accessibilityRole="progressbar"
       accessibilityLabel="Render in progress"
-      className="aspect-[4/5] w-full items-center justify-center rounded-lg border border-dashed border-line bg-paperDeep"
+      className="aspect-[4/5] w-full items-center justify-center rounded-xl border border-dashed border-line bg-paperDeep"
     >
       <ActivityIndicator size="large" />
     </View>

@@ -29,7 +29,7 @@ export const EmptyState = memo(function EmptyState({
   variant = 'default',
   testID,
 }: EmptyStateProps): React.JSX.Element {
-  const eyebrow = variant === 'offline-cached' ? 'Offline · saved on this device' : null;
+  const eyebrow = variant === 'offline-cached' ? 'Offline, saved on this device' : null;
   return (
     <View
       testID={testID}
@@ -38,7 +38,7 @@ export const EmptyState = memo(function EmptyState({
       className="items-center gap-y-sm rounded-xl border border-dashed border-line bg-card px-xl py-2xl"
     >
       {eyebrow ? (
-        <Text className="text-[12px] font-bold uppercase text-muted" style={{ letterSpacing: 1.2 }}>
+        <Text className="text-[12px] font-semibold text-muted">
           {eyebrow}
         </Text>
       ) : null}

@@ -183,7 +183,7 @@ export default function SelfieCapture() {
           onPress={() => void requestPermission()}
           testID="selfie-grant"
         >
-          <Text style={[styles.buttonText, { color: colors.onPrimary }]}>Allow camera</Text>
+          <Text style={[styles.buttonText, { color: colors.onPrimary }]}>Allow camera access</Text>
         </Pressable>
       </View>
     );
@@ -284,7 +284,7 @@ export default function SelfieCapture() {
             {busy === 'capture' ? (
               <ActivityIndicator color={colors.onPrimary} />
             ) : (
-              <Text style={[styles.buttonText, { color: colors.onPrimary }]}>Capture</Text>
+              <Text style={[styles.buttonText, { color: colors.onPrimary }]}>Take the photo</Text>
             )}
           </Pressable>
         )}

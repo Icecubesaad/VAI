@@ -390,7 +390,7 @@ export default function AuthScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, padding: 24, justifyContent: 'center', gap: 12 },
-  title: { fontSize: 26, fontWeight: '800' },
+  title: { fontSize: 30, fontWeight: '800', fontFamily: 'Georgia' },
   sub: { fontSize: 15, lineHeight: 22, marginBottom: 12 },
   apple: { width: '100%', height: 52 },
   button: { borderRadius: 12, paddingVertical: 14, alignItems: 'center' },

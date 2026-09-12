@@ -36,8 +36,8 @@ export const ShareCard = memo(function ShareCard({
       accessibilityLabel={`Style DNA: ${teaser}. Labels: ${labels.join(', ')}. Season ${colorSeason}`}
       className="gap-y-md rounded-xl border border-lineOnCard bg-card p-lg shadow-card"
     >
-      <Text className="text-[12px] font-bold uppercase tracking-widest text-terracotta">
-        My Style DNA
+      <Text className="text-[13px] font-semibold text-terracotta">
+        Your style DNA
       </Text>
       <Text className="font-display text-[22px] leading-[28px] font-semibold text-ink">
         {teaser}
@@ -48,7 +48,7 @@ export const ShareCard = memo(function ShareCard({
         ))}
       </View>
       <Text className="text-[15px] leading-[22px] text-inkSoft">
-        Season · <Text className="font-bold text-ink">{colorSeason}</Text>
+        Suits a <Text className="font-bold text-ink">{colorSeason}</Text> palette
       </Text>
       {watermark ? (
         <Text className="border-t border-line pt-md text-[13px] leading-[18px] font-semibold text-inkSoft">

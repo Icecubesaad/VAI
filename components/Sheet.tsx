@@ -73,12 +73,12 @@ const PlanCard = memo(function PlanCard({
       }`}
     >
       <View className="flex-row items-center justify-between">
-        <Text className={`text-[15px] font-bold uppercase tracking-wide ${selected ? 'text-terracottaDeep' : 'text-ink'}`}>
+        <Text className={`text-[15px] font-bold ${selected ? 'text-terracottaDeep' : 'text-ink'}`}>
           {meta.title}
         </Text>
         {isYearly ? (
           <View className="rounded-pill bg-goldWash px-sm py-[2px]">
-            <Text className="text-[11px] font-bold uppercase tracking-wide text-gold">Best value</Text>
+            <Text className="text-[11px] font-bold text-gold">Best value</Text>
           </View>
         ) : null}
       </View>

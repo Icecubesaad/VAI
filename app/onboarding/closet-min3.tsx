@@ -5,6 +5,8 @@ import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { decode } from 'base64-arraybuffer';
 import { useTheme } from '@/theme';
+import { PressScale } from '@/components';
+import { hapticFor } from '@/lib/haptics';
 import { BUCKETS, supabase } from '@/lib/supabase';
 import { compressGarmentPhoto, ImagePipelineError } from '@/lib/perf/image-pipeline';
 import { api, apiErrorCopy, type Garment } from '@/lib/api';
@@ -72,8 +74,16 @@ export default function ClosetMin3() {
           costPerWear: null,
           source,
         };
+        const before = useCloset.getState().order.length;
         upsert(garment);
         setLastSync(new Date().toISOString());
+        // Success confirmation: crossing the 3-item threshold earns the done
+        // tick (Continue unlocks); other adds get a quiet select tick.
+        if (before < CLOSET_MIN_COUNT && useCloset.getState().order.length >= CLOSET_MIN_COUNT) {
+          void hapticFor.done();
+        } else {
+          void hapticFor.select();
+        }
       } catch (e) {
         setError(e instanceof ImagePipelineError ? e.message : apiErrorCopy(e).message);
       } finally {
@@ -85,6 +95,7 @@ export default function ClosetMin3() {
 
   const addItem = useCallback(async () => {
     setError(null);
+    void hapticFor.select();
     if (useCloset.getState().order.length > FREE_CLOSET_CAP) {
       setError(
         `Your closet is over the ${FREE_CLOSET_CAP}-item free limit — extras are read-only. Upgrade to edit.`,
@@ -107,6 +118,7 @@ export default function ClosetMin3() {
   // Photo-library path: same compress → upload → auto-tag pipeline as camera.
   const addFromLibrary = useCallback(async () => {
     setError(null);
+    void hapticFor.select();
     if (useCloset.getState().order.length > FREE_CLOSET_CAP) {
       setError(
         `Your closet is over the ${FREE_CLOSET_CAP}-item free limit — extras are read-only. Upgrade to edit.`,
@@ -129,6 +141,7 @@ export default function ClosetMin3() {
   }, [processUri]);
 
   const goFirstOutfit = useCallback(() => {
+    void hapticFor.confirm();
     setStep('firstOutfit');
     router.replace('/onboarding/first-outfit');
   }, [router, setStep]);
@@ -162,26 +175,26 @@ export default function ClosetMin3() {
         <View style={styles.state} testID="closet-adding">
           <ActivityIndicator size="large" />
           <Text style={[styles.sub, { color: colors.muted }]}>
-            Tagging your garment — category, colors, fabric…
+            Tagging your garment: category, colors, fabric…
           </Text>
         </View>
       ) : (
         <>
-          <Pressable
+          <PressScale
             style={[styles.add, { borderColor: colors.border, borderWidth: 1 }]}
             onPress={() => void addItem()}
             testID="closet-add-item"
           >
             <Text style={styles.addArt}>📷</Text>
-            <Text style={[styles.addText, { color: colors.text }]}>+ Add item (camera)</Text>
-          </Pressable>
-          <Pressable
+            <Text style={[styles.addText, { color: colors.text }]}>Photograph an item</Text>
+          </PressScale>
+          <PressScale
             style={[styles.add, styles.library, { borderColor: colors.border, borderWidth: 1 }]}
             onPress={() => void addFromLibrary()}
             testID="closet-add-library"
           >
-            <Text style={[styles.addText, { color: colors.text }]}>+ Choose from library</Text>
-          </Pressable>
+            <Text style={[styles.addText, { color: colors.text }]}>Choose from library</Text>
+          </PressScale>
         </>
       )}
 
@@ -203,7 +216,7 @@ export default function ClosetMin3() {
         </View>
       )}
 
-      <Pressable
+      <PressScale
         style={[styles.button, { backgroundColor: done ? colors.primary : colors.border }]}
         onPress={goFirstOutfit}
         disabled={!done}
@@ -212,7 +225,7 @@ export default function ClosetMin3() {
         <Text style={[styles.buttonText, { color: colors.onPrimary }]}>
           {done ? 'See my first outfit' : `Add ${CLOSET_MIN_COUNT - count} more to continue`}
         </Text>
-      </Pressable>
+      </PressScale>
       <Pressable
         onPress={() => {
           setStep('selfie');
@@ -220,7 +233,7 @@ export default function ClosetMin3() {
         }}
         testID="closet-back"
       >
-        <Text style={[styles.back, { color: colors.muted }]}>← Back (items are kept)</Text>
+        <Text style={[styles.back, { color: colors.muted }]}>Go back, items are kept</Text>
       </Pressable>
     </View>
   );
@@ -229,7 +242,7 @@ export default function ClosetMin3() {
 const styles = StyleSheet.create({
   root: { flex: 1, padding: 24, paddingTop: 64 },
   progress: { fontSize: 13, fontWeight: '700' },
-  title: { fontSize: 26, fontWeight: '800', marginTop: 8 },
+  title: { fontSize: 30, fontWeight: '800', fontFamily: 'Georgia', marginTop: 8 },
   sub: { fontSize: 14, marginTop: 4, lineHeight: 20 },
   dots: { flexDirection: 'row', gap: 8, marginVertical: 20 },
   dot: { flex: 1, height: 8, borderRadius: 4 },

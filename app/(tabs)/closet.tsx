@@ -3,8 +3,9 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import { useRouter } from 'expo-router';
 import { FlashList } from '@shopify/flash-list';
 import { useTheme } from '@/theme';
-import { GarmentCard } from '@/components';
+import { GarmentCard, PressScale } from '@/components';
 import type { Garment } from '@/lib/api';
+import { hapticFor } from '@/lib/haptics';
 import { useCloset, selectClosetList, selectClosetCount, FREE_CLOSET_CAP } from '@/store/closet';
 
 /**
@@ -32,15 +33,18 @@ export default function ClosetScreen() {
     const topCat = Object.entries(byCat).sort((a, b) => b[1] - a[1])[0];
     const topColor = Object.entries(colorHits).sort((a, b) => b[1] - a[1])[0];
     if (!topCat) return null;
+    const catName = `${topCat[0]}${topCat[1] > 1 ? 's' : ''}`;
     const hasRed = Object.keys(colorHits).some((c) => c.includes('red'));
-    const gap = hasRed ? '' : ', no red';
-    return `${topCat[1]} ${topCat[0]}${topCat[1] > 1 ? 's' : ''}${topColor ? `, lots of ${topColor[0]}` : ''}${gap}`;
+    if (!topColor) return `Mostly ${catName} so far.`;
+    const gap = hasRed ? '' : ' A red piece would stretch this closet.';
+    return `Mostly ${catName} in ${topColor[0]}.${gap}`;
   }, [garments]);
 
   const handleAdd = useCallback(() => {
     // Camera capture + upload flow lives behind the garment picker (owned by UI/UX
     // for the sheet UI); this route hands off with cap enforcement.
     setAddError(null);
+    void hapticFor.select();
     if (count >= FREE_CLOSET_CAP) {
       setAddError('Your closet is full (50 items). Upgrade to add more.');
       return;
@@ -76,7 +80,7 @@ export default function ClosetScreen() {
       <View style={styles.header}>
         <Text style={[styles.title, { color: colors.text }]}>Closet</Text>
         <Text style={[styles.count, { color: colors.muted }]} testID="closet-count">
-          {count}/{FREE_CLOSET_CAP}
+          {count} of {FREE_CLOSET_CAP}
         </Text>
       </View>
 
@@ -87,7 +91,7 @@ export default function ClosetScreen() {
       )}
 
       <View style={styles.addBar}>
-        <Pressable
+        <PressScale
           style={[styles.addButton, { backgroundColor: colors.primary }]}
           onPress={handleAdd}
           disabled={adding}
@@ -96,30 +100,39 @@ export default function ClosetScreen() {
           {adding ? (
             <ActivityIndicator color={colors.onPrimary} />
           ) : (
-            <Text style={[styles.addText, { color: colors.onPrimary }]}>+ Add item (camera)</Text>
+            <Text style={[styles.addText, { color: colors.onPrimary }]}>Add an item</Text>
           )}
-        </Pressable>
-        <Pressable
+        </PressScale>
+        <PressScale
           style={[styles.gapButton, { borderColor: colors.border, borderWidth: 1 }]}
-          onPress={() => router.push('/(tabs)/shop')}
+          onPress={() => {
+            void hapticFor.select();
+            router.push('/(tabs)/shop');
+          }}
           testID="fill-gaps"
         >
           <Text style={[styles.gapText, { color: colors.text }]}>Fill my gaps</Text>
-        </Pressable>
+        </PressScale>
       </View>
       {!!addError && (
-        <Text style={[styles.error, { color: colors.danger }]} testID="closet-error">
-          {addError}
-        </Text>
+        <View style={[styles.errorBox, { backgroundColor: colors.surface, borderColor: colors.border }]} testID="closet-error">
+          <Text style={[styles.error, { color: colors.danger }]}>{addError}</Text>
+        </View>
       )}
 
       {garments.length === 0 ? (
         <View style={styles.state} testID="closet-empty">
-          <Text style={[styles.stateTitle, { color: colors.text }]}>Your closet is empty</Text>
+          <Text style={[styles.stateTitle, { color: colors.text }]}>Start with one piece</Text>
           <Text style={[styles.stateText, { color: colors.muted }]}>
-            Photograph one garment at a time — we&apos;ll tag the category, colors and fabric for
-            you.
+            Photograph one garment at a time. We tag the category, colors and fabric for you.
           </Text>
+          <Pressable
+            style={[styles.emptyCta, { backgroundColor: colors.primary }]}
+            onPress={handleAdd}
+            testID="closet-empty-cta"
+          >
+            <Text style={[styles.addText, { color: colors.onPrimary }]}>Add your first item</Text>
+          </Pressable>
         </View>
       ) : (
         <FlashList
@@ -138,16 +151,18 @@ export default function ClosetScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, padding: 16 },
   header: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
-  title: { fontSize: 24, fontWeight: '700' },
+  title: { fontSize: 28, fontWeight: '700', fontFamily: 'Georgia' },
   count: { fontSize: 13 },
   banner: { borderRadius: 12, padding: 12, marginTop: 12 },
   bannerText: { fontSize: 14 },
   addBar: { flexDirection: 'row', gap: 10, marginTop: 12 },
   addButton: { flex: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  emptyCta: { borderRadius: 12, paddingVertical: 14, paddingHorizontal: 24, alignItems: 'center', marginTop: 8 },
   addText: { fontSize: 15, fontWeight: '600' },
   gapButton: { flex: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
   gapText: { fontSize: 15, fontWeight: '600' },
-  error: { fontSize: 13, marginTop: 8 },
+  error: { fontSize: 13, lineHeight: 18 },
+  errorBox: { borderWidth: 1, borderRadius: 12, padding: 12, marginTop: 8 },
   grid: { paddingVertical: 12 },
   state: { alignItems: 'center', paddingVertical: 48, gap: 8 },
   stateTitle: { fontSize: 18, fontWeight: '600' },

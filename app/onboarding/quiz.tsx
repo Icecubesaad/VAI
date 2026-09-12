@@ -112,10 +112,10 @@ export default function QuizScreen() {
           referralCode={referralCode}
         />
         <Pressable style={[styles.button, { backgroundColor: colors.primary }]} onPress={goSelfie} testID="quiz-continue">
-          <Text style={[styles.buttonText, { color: colors.onPrimary }]}>Continue — mirror selfie</Text>
+          <Text style={[styles.buttonText, { color: colors.onPrimary }]}>Continue to your mirror selfie</Text>
         </Pressable>
         <Pressable onPress={clearResult} testID="quiz-result-back">
-          <Text style={[styles.back, { color: colors.muted }]}>← Back to answers (kept)</Text>
+          <Text style={[styles.back, { color: colors.muted }]}>Back to answers</Text>
         </Pressable>
       </View>
     );
@@ -173,7 +173,7 @@ export default function QuizScreen() {
         {!result && (
           <Pressable onPress={skipQuiz} testID="quiz-skip">
             <Text style={[styles.back, { color: colors.muted }]}>
-              Skip — use starter style
+              Skip and use a starter style
             </Text>
           </Pressable>
         )}
@@ -184,7 +184,7 @@ export default function QuizScreen() {
             disabled={submitting}
             testID="quiz-submit"
           >
-            <Text style={[styles.buttonText, { color: colors.onPrimary }]}>See my DNA</Text>
+            <Text style={[styles.buttonText, { color: colors.onPrimary }]}>See my style DNA</Text>
           </Pressable>
         )}
       </View>
@@ -195,7 +195,7 @@ export default function QuizScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, padding: 24, paddingTop: 64 },
   progress: { fontSize: 13, fontWeight: '600' },
-  title: { fontSize: 26, fontWeight: '800', marginTop: 8 },
+  title: { fontSize: 30, fontWeight: '800', fontFamily: 'Georgia', marginTop: 8 },
   hint: { fontSize: 14, marginTop: 4 },
   choices: { gap: 10, marginTop: 24 },
   choice: { borderRadius: 12, paddingVertical: 14, paddingHorizontal: 16 },

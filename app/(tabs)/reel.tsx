@@ -521,7 +521,7 @@ export default function ReelScreen() {
 
   const missing = poses ? missingPoses(poses) : [];
   const tierLabel =
-    drop && cachedWeek === weekOf ? (drop.tier === 'teaser' ? ' · Teaser' : ' · Full drop') : '';
+    drop && cachedWeek === weekOf ? (drop.tier === 'teaser' ? ', teaser' : ', full drop') : '';
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]} testID="reel-screen">

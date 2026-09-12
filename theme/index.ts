@@ -25,6 +25,7 @@ export { ThemeProvider };
 export {
   tokens,
   spacing,
+  fonts,
   typeScale,
   radii,
   shadows,
@@ -33,6 +34,7 @@ export {
 export type {
   ColorName,
   SpacingName,
+  FontName,
   TypeName,
   RadiiName,
   ShadowName,
@@ -54,10 +56,18 @@ export const colors = {
   muted: tokens.colors.muted,
   /** Brand accent (CTAs, active states) */
   primary: tokens.colors.terracotta,
+  /** Pressed/active text on washes (badges, exhausted counters) */
+  primaryDeep: tokens.colors.terracottaDeep,
+  /** Editorial lead — bordeaux for display kickers, DNA/share moments */
+  editorial: tokens.colors.oxblood,
   /** Text on top of `primary` */
   onPrimary: tokens.colors.applePaper,
   /** Hairline borders */
   border: tokens.colors.line,
+  /** Sunken wells / sheet grounds unreachable via `surface` alone */
+  surfaceDeep: tokens.colors.paperDeep,
+  /** Linen media well (image placeholders, thumbs) */
+  well: tokens.colors.well,
   /** Errors / destructive */
   danger: tokens.colors.danger,
   /** Success states (recommended) */

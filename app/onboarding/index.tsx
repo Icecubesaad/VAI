@@ -8,7 +8,7 @@ const SLIDES = [
   {
     key: 'plan',
     title: 'Wake up to the right outfit',
-    body: 'VAI plans one hero outfit a day from YOUR closet — weather and plans included.',
+    body: 'VAI plans one hero outfit a day from your own closet, weather and plans included.',
   },
   {
     key: 'tryon',
@@ -99,7 +99,7 @@ const styles = StyleSheet.create({
   slide: { paddingHorizontal: 24, gap: 12 },
   art: { height: 320, borderRadius: 20, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
   artEmoji: { fontSize: 96 },
-  title: { fontSize: 26, fontWeight: '800', marginTop: 12 },
+  title: { fontSize: 30, fontWeight: '800', fontFamily: 'Georgia', marginTop: 12 },
   body: { fontSize: 15, lineHeight: 22 },
   dots: { flexDirection: 'row', gap: 8, justifyContent: 'center', marginVertical: 16 },
   dot: { width: 8, height: 8, borderRadius: 4 },

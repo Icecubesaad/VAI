@@ -1,10 +1,11 @@
 import { useCallback, useMemo } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { useTheme } from '@/theme';
-import { OutfitCard } from '@/components';
+import { EditorialReveal, OutfitCard, PressScale, SkeletonHero } from '@/components';
 import { api, apiErrorCopy } from '@/lib/api';
+import { hapticFor } from '@/lib/haptics';
 import { useSession } from '@/store/session';
 import { useCloset, selectClosetList } from '@/store/closet';
 import { useQuiz } from '@/store/quiz';
@@ -54,6 +55,7 @@ export default function FirstOutfit() {
 
   const goNext = useCallback(() => {
     markSeen();
+    void hapticFor.confirm();
     const hit = shouldTriggerPaywall({
       quizDone,
       closetCount: count,
@@ -76,13 +78,15 @@ export default function FirstOutfit() {
 
       {outfitQuery.isPending && !showFallback ? (
         <View style={styles.state} testID="first-outfit-loading">
-          <ActivityIndicator size="large" />
+          <View style={{ width: '100%' }}>
+            <SkeletonHero />
+          </View>
           <Text style={[styles.body, { color: colors.muted }]}>
             Styling your first look from your {count} items…
           </Text>
         </View>
       ) : outfit ? (
-        <View>
+        <EditorialReveal playKey={outfit.id}>
           <OutfitCard
             outfitId={outfit.id}
             garmentImages={outfitGarments.map((g) => g.cutoutUrl ?? g.imageUrl)}
@@ -92,9 +96,9 @@ export default function FirstOutfit() {
           <Text style={[styles.why, { color: colors.muted }]} testID="first-outfit-why">
             {outfit.whyLine}
           </Text>
-        </View>
+        </EditorialReveal>
       ) : showFallback ? (
-        <View>
+        <EditorialReveal playKey="local-fallback">
           <OutfitCard outfitId="local-fallback" garmentImages={fallbackImages} whyLine={FALLBACK_WHY} hero />
           <Text style={[styles.why, { color: colors.muted }]} testID="first-outfit-fallback">
             {outfitQuery.isError
@@ -102,15 +106,18 @@ export default function FirstOutfit() {
               : 'Add a few more items and we will style your first look.'}
           </Text>
           {outfitQuery.isError && (
-            <Pressable
+            <PressScale
               style={[styles.retry, { borderColor: colors.border, borderWidth: 1 }]}
-              onPress={() => void outfitQuery.refetch()}
+              onPress={() => {
+                void hapticFor.select();
+                void outfitQuery.refetch();
+              }}
               testID="first-outfit-retry"
             >
               <Text style={[styles.retryText, { color: colors.text }]}>Try again (free)</Text>
-            </Pressable>
+            </PressScale>
           )}
-        </View>
+        </EditorialReveal>
       ) : (
         <View style={styles.state} testID="first-outfit-error">
           <Text style={[styles.title, { color: colors.text }]}>
@@ -122,19 +129,22 @@ export default function FirstOutfit() {
               : 'Add a few more items and we will style your first look.'}
           </Text>
           {outfitQuery.isError && (
-            <Pressable
+            <PressScale
               style={[styles.button, { backgroundColor: colors.primary }]}
-              onPress={() => void outfitQuery.refetch()}
+              onPress={() => {
+                void hapticFor.select();
+                void outfitQuery.refetch();
+              }}
               testID="first-outfit-retry"
             >
-              <Text style={[styles.buttonText, { color: colors.onPrimary }]}>Try again</Text>
-            </Pressable>
+              <Text style={[styles.buttonText, { color: colors.onPrimary }]}>Try again (free)</Text>
+            </PressScale>
           )}
         </View>
       )}
 
       <View>
-        <Pressable
+        <PressScale
           style={[
             styles.button,
             { backgroundColor: outfit || showFallback ? colors.primary : colors.border },
@@ -143,10 +153,10 @@ export default function FirstOutfit() {
           disabled={!outfit && !showFallback}
           testID="first-outfit-continue"
         >
-          <Text style={[styles.buttonText, { color: colors.onPrimary }]}>Continue</Text>
-        </Pressable>
+          <Text style={[styles.buttonText, { color: colors.onPrimary }]}>Finish setup</Text>
+        </PressScale>
         <Pressable onPress={goBack} testID="first-outfit-back">
-          <Text style={[styles.back, { color: colors.muted }]}>← Back (items are kept)</Text>
+          <Text style={[styles.back, { color: colors.muted }]}>Go back, items are kept</Text>
         </Pressable>
       </View>
     </View>
@@ -155,7 +165,7 @@ export default function FirstOutfit() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, padding: 24, paddingTop: 64, justifyContent: 'space-between' },
-  kicker: { fontSize: 13, fontWeight: '700', textTransform: 'uppercase' },
+  kicker: { fontSize: 13, fontWeight: '700' },
   title: { fontSize: 22, fontWeight: '700', textAlign: 'center' },
   body: { fontSize: 14, textAlign: 'center', lineHeight: 20 },
   why: { fontSize: 14, lineHeight: 20, marginTop: 12 },

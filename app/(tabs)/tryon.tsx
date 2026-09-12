@@ -14,7 +14,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Image } from 'expo-image';
 import * as Crypto from 'expo-crypto';
 import { useTheme } from '@/theme';
-import { QuotaBadge, RenderView } from '@/components';
+import { PressScale, QuotaBadge, RenderProgress, RenderView, ResultReveal } from '@/components';
 import {
   ApiError,
   api,
@@ -26,6 +26,7 @@ import {
   type PoseMode,
 } from '@/lib/api';
 import { renderCostPropsFromResult, track } from '@/lib/analytics';
+import { hapticFor } from '@/lib/haptics';
 import { createSignedBasePhotoUrl, supabase } from '@/lib/supabase';
 import { useSession } from '@/store/session';
 import { useCloset, selectClosetList } from '@/store/closet';
@@ -476,6 +477,7 @@ export default function TryOnScreen() {
   }, [job, shareBoardId, sharing]);
 
   const toggleSelect = useCallback((id: string) => {
+    void hapticFor.select();
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
   }, []);
 
@@ -501,15 +503,19 @@ export default function TryOnScreen() {
           <Text style={[styles.baseTitle, { color: colors.text }]}>Base photo</Text>
           <Pressable onPress={() => router.push('/onboarding/selfie-capture')} testID="tryon-retake">
             <Text style={[styles.link, { color: colors.primary }]}>
-              {basePhotoUrl ? 'Retake' : 'Take mirror selfie'}
+              {basePhotoUrl ? 'Retake' : 'Take a mirror selfie'}
             </Text>
           </Pressable>
         </View>
         <View style={styles.modes}>
           {(['tryon', 'restyle', 'compare'] as RenderMode[]).map((m) => (
-            <Pressable
+            <PressScale
               key={m}
-              onPress={() => setMode(m)}
+              scaleTo={0.98}
+              onPress={() => {
+                void hapticFor.select();
+                setMode(m);
+              }}
               style={[
                 styles.mode,
                 { borderColor: colors.border },
@@ -520,7 +526,7 @@ export default function TryOnScreen() {
               <Text style={[styles.modeText, { color: mode === m ? colors.onPrimary : colors.text }]}>
                 {m === 'tryon' ? 'Try-on' : m === 'restyle' ? 'Restyle' : 'Compare'}
               </Text>
-            </Pressable>
+            </PressScale>
           ))}
         </View>
       </View>
@@ -549,7 +555,7 @@ export default function TryOnScreen() {
             style={[styles.button, { backgroundColor: colors.primary }]}
             onPress={() => router.push('/(tabs)/closet')}
           >
-            <Text style={[styles.buttonText, { color: colors.onPrimary }]}>Go to closet</Text>
+            <Text style={[styles.buttonText, { color: colors.onPrimary }]}>Add to your closet</Text>
           </Pressable>
         </View>
       ) : (
@@ -562,25 +568,32 @@ export default function TryOnScreen() {
           renderItem={({ item }) => {
             const active = selected.includes(item.id);
             return (
-              <Pressable onPress={() => toggleSelect(item.id)} testID={`select-${item.id}`}>
+              <PressScale
+                scaleTo={0.95}
+                onPress={() => toggleSelect(item.id)}
+                testID={`select-${item.id}`}
+              >
                 <Image
                   source={{ uri: item.cutoutUrl ?? item.imageUrl }}
                   style={[styles.pick, active && { borderColor: colors.primary, borderWidth: 3 }]}
                   contentFit="cover"
                 />
-              </Pressable>
+              </PressScale>
             );
           }}
         />
       )}
 
-      <Pressable
+      <PressScale
         style={[
           styles.button,
           { backgroundColor: canGenerate ? colors.primary : colors.border },
           styles.generate,
         ]}
-        onPress={() => void handleGenerate()}
+        onPress={() => {
+          void hapticFor.confirm();
+          void handleGenerate();
+        }}
         disabled={!canGenerate}
         testID="tryon-generate"
       >
@@ -588,34 +601,36 @@ export default function TryOnScreen() {
           <ActivityIndicator color={colors.onPrimary} />
         ) : (
           <Text style={[styles.buttonText, { color: colors.onPrimary }]}>
-            {tier === 'free' && rendersLeft <= 0 ? 'Out of renders — Upgrade' : 'Generate'}
+            {tier === 'free' && rendersLeft <= 0
+              ? 'Get more renders'
+              : mode === 'restyle'
+                ? 'Restyle this look'
+                : 'See it on me'}
           </Text>
         )}
-      </Pressable>
+      </PressScale>
       {!!error && (
-        <Text style={[styles.error, { color: colors.danger }]} testID="tryon-error">
-          {error}
-        </Text>
-      )}
-
-      {/* Result / 2-up compare */}
-      {busy && (
-        <View style={styles.state} testID="tryon-loading">
-          <ActivityIndicator size="large" />
-          <Text style={[styles.stateText, { color: colors.muted }]}>
-            Creating your try-on — usually ~20s. We&apos;ll notify you when it&apos;s ready.
-          </Text>
+        <View style={[styles.errorBox, { backgroundColor: colors.surface, borderColor: colors.border }]} testID="tryon-error">
+          <Text style={[styles.error, { color: colors.danger }]}>{error}</Text>
         </View>
       )}
-      {!!job && (job.status === 'done' || busy) && (
-        <RenderView
-          basePhotoUrl={basePhotoUrl}
-          outputUrl={job.outputUrl ?? null}
-          status={job.status}
-          compare={mode === 'compare'}
-          watermark
-        />
-      )}
+
+      {/* Result / 2-up compare — the staged progress box shares the result's
+          4:5 geometry, so progress → result crossfades in place (cheap
+          shared-element continuity). RenderView's own compact loading slot
+          stays for its other parents; this screen owns the staged copy. */}
+      {busy && <RenderProgress testID="tryon-loading" />}
+      <ResultReveal revealKey={job && job.status === 'done' ? job.id : null}>
+        {!!job && job.status === 'done' && (
+          <RenderView
+            basePhotoUrl={basePhotoUrl}
+            outputUrl={job.outputUrl ?? null}
+            status={job.status}
+            compare={mode === 'compare'}
+            watermark
+          />
+        )}
+      </ResultReveal>
       {!!job && job.status === 'done' && styledWithTaste && (
         <Text style={[styles.tasteCaption, { color: colors.muted }]} testID="taste-caption">
           Styled with your inspiration
@@ -637,13 +652,16 @@ export default function TryOnScreen() {
         </Pressable>
       )}
       {phase === 'failed' && !busy && (
-        <Pressable
+        <PressScale
           style={[styles.button, { borderColor: colors.border, borderWidth: 1 }]}
-          onPress={() => void handleGenerate()}
+          onPress={() => {
+            void hapticFor.select();
+            void handleGenerate();
+          }}
           testID="tryon-retry"
         >
           <Text style={[styles.buttonText, { color: colors.text }]}>Retry (free)</Text>
-        </Pressable>
+        </PressScale>
       )}
 
       {/* Share-back: board picker → explicit confirm → pinterest-share. */}
@@ -727,7 +745,7 @@ export default function TryOnScreen() {
                     <ActivityIndicator color={colors.onPrimary} />
                   ) : (
                     <Text style={[styles.buttonText, { color: colors.onPrimary }]}>
-                      Confirm — save this look
+                      Save this look
                     </Text>
                   )}
                 </Pressable>
@@ -754,7 +772,7 @@ function todayKey(): string {
 const styles = StyleSheet.create({
   root: { flex: 1, padding: 16 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  title: { fontSize: 24, fontWeight: '700' },
+  title: { fontSize: 28, fontWeight: '700', fontFamily: 'Georgia' },
   baseRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 12 },
   baseThumb: { width: 56, height: 72, borderRadius: 10, backgroundColor: '#EDE8E0' },
   baseEmpty: { borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
@@ -772,7 +790,8 @@ const styles = StyleSheet.create({
   buttonText: { fontSize: 15, fontWeight: '600' },
   generate: { marginTop: 4 },
   shareBtn: { marginTop: 10 },
-  error: { fontSize: 13, marginTop: 8 },
+  error: { fontSize: 13, lineHeight: 18 },
+  errorBox: { borderWidth: 1, borderRadius: 12, padding: 12, marginTop: 8 },
   tasteCaption: { fontSize: 12, marginTop: 6, textAlign: 'center' },
   state: { alignItems: 'center', paddingVertical: 24, gap: 8 },
   stateTitle: { fontSize: 18, fontWeight: '600' },

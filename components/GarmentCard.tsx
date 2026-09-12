@@ -72,7 +72,7 @@ export const GarmentCard = memo(function GarmentCard({
           />
         ) : (
           <View className="h-full w-full items-center justify-center" accessible accessibilityLabel="No photo yet">
-            <Text className="text-[12px] font-medium uppercase tracking-widest text-muted">{garment.category}</Text>
+            <Text className="font-display text-[20px] capitalize text-muted">{garment.category}</Text>
           </View>
         )}
       </View>
@@ -81,14 +81,13 @@ export const GarmentCard = memo(function GarmentCard({
           {garment.category}
         </Text>
         <Text className="text-[12px] leading-[16px] text-inkSoft" numberOfLines={1}>
-          {[garment.colors?.slice(0, 2).join(' · '), garment.fabric].filter(Boolean).join(' · ') || '—'}
+          {[garment.colors?.slice(0, 2).join(', '), garment.fabric].filter(Boolean).join(', ') || 'Still tagging'}
         </Text>
         <View className="mt-[2px] flex-row items-center gap-x-[4px]">
           {typeof garment.wearCount === 'number' && garment.wearCount > 0 ? (
             <Badge label={`×${garment.wearCount}`} tone="neutral" />
           ) : null}
           {cpw ? <Badge label={`${cpw}/wear`} tone="sage" /> : null}
-          {garment.formality != null && garment.formality >= 4 ? <Badge label="Dressy" tone="gold" /> : null}
         </View>
       </View>
       {onDelete ? (

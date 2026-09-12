@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
 import { FlashList } from '@shopify/flash-list';
 import { Image } from 'expo-image';
 import { useQuery } from '@tanstack/react-query';
@@ -16,6 +17,7 @@ import { usePaywall } from '@/store/paywall';
  * Affiliate = physical goods only (IAP-exempt). Price-drop alerts = v2.
  */
 export default function ShopScreen() {
+  const router = useRouter();
   const { colors } = useTheme();
   const userId = useSession((s) => s.userId);
   const tier = usePaywall((s) => s.tier);
@@ -115,10 +117,12 @@ export default function ShopScreen() {
           <Text style={[styles.title, { color: colors.text }]} numberOfLines={2}>
             {item.title}
           </Text>
-          <Text style={[styles.sub, { color: colors.muted }]}>
-            {item.retailer}
-            {item.rating != null ? ` · ★ ${item.rating.toFixed(1)}` : ''}
-          </Text>
+          <Text style={[styles.sub, { color: colors.muted }]}>{item.retailer}</Text>
+          {item.rating != null ? (
+            <Text style={[styles.sub, { color: colors.muted }]}>
+              Rated {item.rating.toFixed(1)} out of 5
+            </Text>
+          ) : null}
           <Text style={[styles.reason, { color: colors.muted }]} numberOfLines={2}>
             {item.valueAddReason}
           </Text>
@@ -170,8 +174,15 @@ export default function ShopScreen() {
         <View style={styles.state} testID="shop-empty">
           <Text style={[styles.stateTitle, { color: colors.text }]}>No picks yet</Text>
           <Text style={[styles.stateText, { color: colors.muted }]}>
-            Build your closet and plan outfits — gap-filling picks will show up here.
+            Add to your closet and plan outfits. Gap-filling picks will show up here.
           </Text>
+          <Pressable
+            style={[styles.retry, { backgroundColor: colors.primary }]}
+            onPress={() => router.push('/(tabs)')}
+            testID="shop-empty-cta"
+          >
+            <Text style={[styles.retryText, { color: colors.onPrimary }]}>See today&apos;s outfit</Text>
+          </Pressable>
         </View>
       ) : (
         <FlashList
@@ -194,7 +205,7 @@ export default function ShopScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, padding: 16 },
-  header: { fontSize: 24, fontWeight: '700', marginBottom: 12 },
+  header: { fontSize: 28, fontWeight: '700', fontFamily: 'Georgia', marginBottom: 12 },
   grid: { paddingBottom: 24 },
   card: { flex: 1, borderRadius: 14, overflow: 'hidden', margin: 6 },
   image: { width: '100%', aspectRatio: 3 / 4, backgroundColor: '#EDE8E0' },
@@ -205,7 +216,7 @@ const styles = StyleSheet.create({
   sub: { fontSize: 12 },
   reason: { fontSize: 12, fontStyle: 'italic' },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
-  price: { fontSize: 16, fontWeight: '700' },
+  price: { fontSize: 17, fontWeight: '700', fontFamily: 'Georgia' },
   heart: { fontSize: 24 },
   disclosure: { fontSize: 12, textAlign: 'center', marginTop: 16, paddingHorizontal: 24 },
   state: { alignItems: 'center', paddingVertical: 48, gap: 8 },

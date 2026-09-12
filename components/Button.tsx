@@ -1,6 +1,8 @@
 import React, { memo } from 'react';
-import { Pressable, Text, ActivityIndicator, type PressableProps } from 'react-native';
+import { Text, ActivityIndicator, type PressableProps } from 'react-native';
 import { hapticFor } from '../lib/haptics';
+import { MOTION } from '../lib/motion';
+import { PressScale } from './PressScale';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'premium' | 'danger' | 'dev';
 export type ButtonSize = 'sm' | 'md' | 'lg';
@@ -67,7 +69,7 @@ export const Button = memo(function Button({
   };
 
   return (
-    <Pressable
+    <PressScale
       testID={testID}
       accessibilityRole={accessibilityRole}
       accessibilityLabel={accessibilityLabel ?? title}
@@ -88,7 +90,7 @@ export const Button = memo(function Button({
       ) : (
         <Text className={`${s.text} ${textCls[variant]}`}>{title}</Text>
       )}
-    </Pressable>
+    </PressScale>
   );
 });
 
@@ -119,7 +121,8 @@ export const PremiumCTA = memo(function PremiumCTA({
 }: PremiumCTAProps): React.JSX.Element {
   const isDisabled = disabled || loading;
   return (
-    <Pressable
+    <PressScale
+      scaleTo={MOTION.pressScaleSubtle}
       testID={testID}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? `${title}${subtitle ? `, ${subtitle}` : ''}`}
@@ -146,6 +149,6 @@ export const PremiumCTA = memo(function PremiumCTA({
           {subtitle ? <Text className="font-medium text-white/80"> · {subtitle}</Text> : null}
         </Text>
       )}
-    </Pressable>
+    </PressScale>
   );
 });
