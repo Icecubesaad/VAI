@@ -33,7 +33,7 @@ const SLIDES = [
 export default function OnboardingCarousel() {
   const router = useRouter();
   const { colors } = useTheme();
-  const { width } = useWindowDimensions();
+  const { width, height: winH } = useWindowDimensions();
   const [page, setPage] = useState(0);
   const listRef = useRef<FlatList | null>(null);
   const setStep = useSession((s) => s.setOnboardingStep);
@@ -45,11 +45,13 @@ export default function OnboardingCarousel() {
 
   const next = useCallback(() => {
     if (page < SLIDES.length - 1) {
-      listRef.current?.scrollToIndex({ index: page + 1, animated: true });
+      // scrollToIndex no-ops on RN-web without getItemLayout — offset is exact
+      // because slides are pagingEnabled full-width.
+      listRef.current?.scrollToOffset({ offset: (page + 1) * width, animated: true });
     } else {
       goAuth();
     }
-  }, [page, goAuth]);
+  }, [page, goAuth, width]);
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]} testID="onboarding-carousel">
@@ -76,7 +78,7 @@ export default function OnboardingCarousel() {
         scrollEventThrottle={16}
         onMomentumScrollEnd={(e) => setPage(Math.round(e.nativeEvent.contentOffset.x / width))}
         renderItem={({ item }) => (
-          <View style={[styles.slide, { width }]}>
+          <View style={[styles.slide, { width, height: winH - 130 }]}>
             <View style={styles.spacer} />
             <Text style={[styles.title, { color: colors.text }]}>
               {item.headlineA}
@@ -126,7 +128,7 @@ const styles = StyleSheet.create({
     transform: [{ rotate: '8deg' }],
     shadowColor: '#E9A8D0', shadowOpacity: 0.5, shadowRadius: 24, shadowOffset: { width: 0, height: 10 },
   },
-  slide: { paddingHorizontal: 28, gap: 12, justifyContent: 'flex-end', paddingBottom: 8, flex: 1 },
+  slide: { paddingHorizontal: 28, gap: 12, justifyContent: 'flex-end', paddingBottom: 8, height: '100%' },
   spacer: { flex: 1 },
   title: { fontSize: 34, fontWeight: '800', fontFamily: 'Georgia', lineHeight: 42 },
   titleSoft: { fontWeight: '400', fontSize: 30 },
