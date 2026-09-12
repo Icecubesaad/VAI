@@ -39,8 +39,18 @@ export default function AuthCallback() {
   useEffect(() => {
     void (async () => {
       try {
-        const { data } = await getSupabase().auth.getSession();
-        const u = data.session?.user;
+        // Android OAuth race: the redirect to vai://auth/callback can land
+        // before auth.tsx finishes `exchangeCodeForSession` — getSession()
+        // immediately sees no session and the user flashes a bogus error.
+        // Poll briefly for the session before declaring failure.
+        const deadline = Date.now() + 3_000;
+        let u = null;
+        while (Date.now() < deadline) {
+          const { data } = await getSupabase().auth.getSession();
+          u = data.session?.user ?? null;
+          if (u) break;
+          await new Promise((r) => setTimeout(r, 250));
+        }
         if (!u) {
           setError('Sign-in did not complete. Try again.');
           return;

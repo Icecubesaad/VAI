@@ -25,7 +25,10 @@ export default function IndexGate() {
     } else if (step === 'done') {
       router.replace('/(tabs)');
     } else {
-      router.replace(STEP_ROUTE[step] as '/onboarding');
+      // Unknown persisted step (schema drift from an older build / corrupt
+      // write) must never crash the boot gate with router.replace(undefined).
+      const route = STEP_ROUTE[step as Exclude<OnboardingStep, 'done'>];
+      router.replace((route ?? '/onboarding') as '/onboarding');
     }
   }, [router, userId, step]);
 

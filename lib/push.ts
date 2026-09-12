@@ -22,6 +22,7 @@ import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { getPublicEnv } from './edge';
+import { getSupabase, isBackendConfigured } from './supabase';
 
 export type PushKind = 'render-ready' | 'trial-reminder' | 'price-drop' | 'referral' | 'week_ready' | 'generic';
 
@@ -156,14 +157,28 @@ export async function registerPushToken(
 }
 
 async function savePushToken(userId: string, expoToken: string, accessToken: string | null): Promise<boolean> {
+  if (!isBackendConfigured()) return false;
   const base = getPublicEnv('EXPO_PUBLIC_SUPABASE_URL').replace(/\/$/, '');
   const anon = getPublicEnv('EXPO_PUBLIC_SUPABASE_ANON_KEY');
+  // push_tokens is RLS-guarded to the owner: the request needs the caller's
+  // JWT. Previously a missing accessToken produced a headerless insert that
+  // could only ever 401 — resolve the session token as the fallback here so
+  // the save can actually succeed.
+  let token = accessToken;
+  if (!token) {
+    try {
+      token = (await getSupabase().auth.getSession()).data.session?.access_token ?? null;
+    } catch {
+      token = null;
+    }
+  }
+  if (!token) return false;
   const res = await fetch(`${base}/rest/v1/push_tokens`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       apikey: anon,
-      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      Authorization: `Bearer ${token}`,
       Prefer: 'resolution=merge-duplicates',
     },
     body: JSON.stringify({ user_id: userId, expo_token: expoToken }),

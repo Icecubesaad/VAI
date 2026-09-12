@@ -17,6 +17,13 @@ import { useTheme } from '@/theme';
 import { supabase } from '@/lib/supabase';
 import { apiErrorCopy } from '@/lib/api';
 import { ageBandForBirthYear, currentYear, useSession, type AgeBand } from '@/store/session';
+import { useCloset } from '@/store/closet';
+import { useQuiz } from '@/store/quiz';
+import { useReel } from '@/store/reel';
+import { useTaste } from '@/store/taste';
+import { useTastePrefs } from '@/store/taste-prefs';
+import { useQuotas } from '@/store/quotas';
+import { api } from '@/lib/api';
 
 const PRIVACY_URL = 'https://vai.style/privacy';
 const U13_COPY =
@@ -86,6 +93,23 @@ export default function AuthScreen() {
       gate: { birthYear: number; ageBand: AgeBand; parentalConsent: boolean },
     ) => {
       setAuth({ userId, email: userEmail });
+      // Cross-user bleed guard (shared devices): persisted funnel data (closet,
+      // quiz DNA, base photo, quota mirror) may belong to whoever used the app
+      // last. A DIFFERENT user signing in starts clean — never resumes
+      // someone else's funnel step or data.
+      const prevOwner = useSession.getState().funnelOwnerId;
+      const isDifferentUser = prevOwner !== null && prevOwner !== userId;
+      if (isDifferentUser) {
+        useCloset.getState().clear();
+        useQuiz.getState().reset();
+        useReel.getState().reset();
+        useTaste.getState().reset();
+        useTastePrefs.getState().reset();
+        useQuotas.getState().reset();
+        useSession.getState().setBasePhoto(null);
+        useSession.getState().setOnboardingStep('quiz');
+      }
+      useSession.getState().setFunnelOwner(userId);
       const parentalConsentAt =
         gate.ageBand === 'p13_17' && gate.parentalConsent ? new Date().toISOString() : null;
       useSession.getState().setAgeGate({
@@ -132,6 +156,13 @@ export default function AuthScreen() {
                   ? '/onboarding/paywall'
                   : '/onboarding/quiz',
       );
+      // Register the inviter link NOW (was previously only reachable on the
+      // paywall, which can be skipped): the server keeps it `pending` until
+      // the 3-items+1-tryon proof and re-checks on every apply — no dead end.
+      const { referredBy, referralRedeemed } = useSession.getState();
+      if (referredBy && !referralRedeemed) {
+        void api.applyReferral({ code: referredBy }).catch(() => undefined);
+      }
     },
     [router, setAuth, setStep],
   );
@@ -139,8 +170,19 @@ export default function AuthScreen() {
   // Kind auth-error copy: map the common Supabase failures onto actionable
   // lines instead of raw server text.
   const fail = useCallback((e: unknown) => {
-    if (e instanceof Error && e.message === 'canceled') return; // user dismissed native sheet
     const raw = e instanceof Error ? e.message : '';
+    // User dismissed the native sheet. Apple's exact text is "The user
+    // canceled the authorization attempt" — match loosely so every cancel
+    // spelling is caught, and ALWAYS unblock the buttons.
+    if (/cancel/i.test(raw)) {
+      setBusy(null);
+      return;
+    }
+    if (/provider is not enabled|unsupported provider/i.test(raw)) {
+      setError('Google/Apple sign-in is not set up for this build yet — use email for now.');
+      setBusy(null);
+      return;
+    }
     if (/invalid login credentials|invalid_login/i.test(raw)) {
       setError('Wrong email or password. Check both and try again — or create an account below.');
     } else if (/user already registered|already.*exists|email.*taken/i.test(raw)) {
@@ -169,6 +211,7 @@ export default function AuthScreen() {
   const needsConsent = previewBand === 'p13_17';
 
   const handleApple = useCallback(async () => {
+    if (busy !== null) return; // AppleAuthenticationButton has no disabled prop — guard here
     if (Platform.OS !== 'ios') {
       setError('Apple sign-in is available on iOS only — use Google or email.');
       return;
@@ -196,7 +239,7 @@ export default function AuthScreen() {
     } catch (e) {
       fail(e);
     }
-  }, [fail, finish, readAgeGate]);
+  }, [busy, fail, finish, readAgeGate]);
 
   const handleGoogle = useCallback(async () => {
     const gate = readAgeGate();
@@ -286,7 +329,7 @@ export default function AuthScreen() {
     } catch (e) {
       fail(e);
     }
-  }, [email, password, mode, fail, finish]);
+  }, [email, password, mode, fail, finish, readAgeGate]);
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]} testID="auth-screen">

@@ -99,9 +99,19 @@ export const usePaywall = create<PaywallState>()(
       purchaseError: null,
 
       fetchStatus: async () => {
+        // No session = no point calling: the server 401s and the console
+        // fills with auth noise on every cold start. Stay quiet, stay local.
+        if (!useSession.getState().userId) {
+          set({ fetching: false, fetchError: null });
+          return null;
+        }
         set({ fetching: true, fetchError: null });
         try {
           const s = await api.paywallStatus();
+          // Server-minted share code (added in 0007) — feeds the watermark.
+          if (s.referralCode && s.referralCode !== useSession.getState().referralCode) {
+            useSession.getState().setReferralCode(s.referralCode);
+          }
           set({
             tier: s.tier,
             trialEndsAt: s.trialEndsAt,
@@ -186,7 +196,17 @@ export const usePaywall = create<PaywallState>()(
           await initBilling(userId);
           await restorePurchases();
           const status = await get().fetchStatus();
-          if (status && status.tier === 'free') {
+          if (!status) {
+            // Store restore succeeded but the server couldn't be reached —
+            // never report success (the old code fell through to restored:true
+            // and dismissed the user while the tier mirror stayed free).
+            set({
+              purchasing: false,
+              purchaseError: 'Restored, but we could not verify it just now. Check your connection and try again.',
+            });
+            return { restored: false, status: null };
+          }
+          if (status.tier === 'free') {
             set({
               purchasing: false,
               purchaseError: 'No active subscription found on this store account.',

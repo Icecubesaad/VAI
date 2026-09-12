@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Image as RNImage, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Image } from 'expo-image';
@@ -45,26 +45,67 @@ export default function SelfieCapture() {
   const gateOpen = ageGatePassed({ ageBand, parentalConsent });
 
   const [preview, setPreview] = useState<string | null>(null);
+  const [previewSource, setPreviewSource] = useState<'camera' | 'library'>('camera');
   const [fail, setFail] = useState<FailReason | null>(null);
   const [busy, setBusy] = useState<'capture' | 'upload' | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  /** Resolve real dimensions: picker/camera metadata first, RN Image probe
+   *  second (web library assets often report 0s), give up third — a photo
+   *  with unknown dimensions is allowed through and the server re-validates.
+   *  Never trap the user on a measurement failure. */
+  const resolveDims = useCallback(async (uri: string, w: number, h: number) => {
+    if (w > 0 && h > 0) return { w, h };
+    try {
+      const probed = await new Promise<{ w: number; h: number }>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('dims-timeout')), 5000);
+        RNImage.getSize(
+          uri,
+          (pw, ph) => {
+            clearTimeout(timer);
+            resolve({ w: pw, h: ph });
+          },
+          (e) => {
+            clearTimeout(timer);
+            reject(e instanceof Error ? e : new Error('dims-failed'));
+          },
+        );
+      });
+      return probed;
+    } catch {
+      return { w: 0, h: 0 };
+    }
+  }, []);
 
   useEffect(() => {
     if (Platform.OS !== 'web' && !permission?.granted) void requestPermission();
   }, [permission?.granted, requestPermission]);
 
   /** Shared quality gate for camera AND library photos (same bar, either source). */
-  const gatePhoto = useCallback(async (uri: string, width: number, height: number) => {
-    if (width < 720 || height < 720) {
-      setPreview(uri);
-      setFail('too_small');
-      return;
+  const gatePhoto = useCallback(async (
+    uri: string,
+    width: number,
+    height: number,
+    source: 'camera' | 'library',
+  ) => {
+    const dims = await resolveDims(uri, width, height);
+    setPreviewSource(source);
+    if (dims.w > 0 && dims.h > 0) {
+      if (dims.w < 720 || dims.h < 720) {
+        setPreview(uri);
+        setFail('too_small');
+        return;
+      }
+      if (dims.h < dims.w * 1.2) {
+        setPreview(uri);
+        setFail('not_portrait');
+        return;
+      }
     }
-    if (height < width * 1.2) {
-      setPreview(uri);
-      setFail('not_portrait');
-      return;
-    }
+    // Unknown dimensions: let it through — the server re-validates
+    // blur/face/keypoints on upload. A measurement miss must never block setup.
+    // Lightweight darkness heuristic: a quality-0.9 full-body photo compresses
+    // well above ~50KB; far below reads dark/blurry. Best-effort only.
     try {
       const info = await FileSystem.getInfoAsync(uri);
       if (info.exists && typeof info.size === 'number' && info.size < 50_000) {
@@ -73,10 +114,10 @@ export default function SelfieCapture() {
         return;
       }
     } catch {
-      // Non-fatal: proceed to upload and let the server re-validate.
+      // Non-fatal (web blob URIs): proceed, server re-validates.
     }
     setPreview(uri);
-  }, []);
+  }, [resolveDims]);
 
   /** Upload a taken picture instead of shooting one — same gate, same upload. */
   const pickFromLibrary = useCallback(async () => {
@@ -94,7 +135,7 @@ export default function SelfieCapture() {
       });
       if (res.canceled || !res.assets?.[0]?.uri) return;
       const asset = res.assets[0];
-      await gatePhoto(asset.uri, asset.width ?? 0, asset.height ?? 0);
+      await gatePhoto(asset.uri, asset.width ?? 0, asset.height ?? 0, 'library');
     } catch {
       setError('Could not open that photo. Please try another.');
     } finally {
@@ -115,37 +156,15 @@ export default function SelfieCapture() {
     try {
       const photo = await cameraRef.current?.takePictureAsync({ quality: 0.9, skipProcessing: false });
       if (!photo?.uri) throw new Error('no-photo');
-      // On-device quality gate (measurable signals; ML checks run server-side).
-      if (photo.width < 720 || photo.height < 720) {
-        setPreview(photo.uri);
-        setFail('too_small');
-        return;
-      }
-      if (photo.height < photo.width * 1.2) {
-        setPreview(photo.uri);
-        setFail('not_portrait');
-        return;
-      }
-      // Lightweight brightness/detail heuristic: a quality-0.9 full-body photo
-      // compresses well above ~50KB; far below that reads dark/blurry.
-      // Best-effort only — the server re-validates blur/face/keypoints.
-      try {
-        const info = await FileSystem.getInfoAsync(photo.uri);
-        if (info.exists && typeof info.size === 'number' && info.size < 50_000) {
-          setPreview(photo.uri);
-          setFail('too_dark');
-          return;
-        }
-      } catch {
-        // Non-fatal: proceed to upload and let the server re-validate.
-      }
-      setPreview(photo.uri);
+      // Same shared gate as library photos (resolution, framing, darkness
+      // heuristic inside gatePhoto; server re-validates blur/face/keypoints).
+      await gatePhoto(photo.uri, photo.width ?? 0, photo.height ?? 0, 'camera');
     } catch {
       setError('Could not take the photo. Please try again.');
     } finally {
       setBusy(null);
     }
-  }, []);
+  }, [gatePhoto]);
 
   const confirm = useCallback(async () => {
     if (!preview) return;
@@ -157,7 +176,7 @@ export default function SelfieCapture() {
     // too dark) can never be confirmed — retake is the only way forward.
     // Only upload-failures keep "Use this photo" (retry the same bytes).
     if (fail !== null && fail !== 'upload_failed') {
-      setError('This photo missed the guide — hit Retake for the best try-ons.');
+      setError('This photo missed the guide — choose a different one or use it anyway.');
       return;
     }
     setFail(null);
@@ -165,7 +184,10 @@ export default function SelfieCapture() {
     setBusy('upload');
     try {
       const userId = useSession.getState().userId;
-      if (!userId) throw new Error('auth');
+      if (!userId) {
+        setError('Sign in to continue your setup — your progress is saved.');
+        return;
+      }
       // Base64 the bytes: FileSystem on native, fetch fallback for web blob URIs.
       let b64: string;
       try {
@@ -227,14 +249,15 @@ export default function SelfieCapture() {
     setError(null);
   }, []);
 
-  if (!permission) {
-    return (
-      <View style={[styles.center, { backgroundColor: colors.background }]} testID="selfie-loading">
-        <ActivityIndicator size="large" />
-      </View>
-    );
-  }
-  if (!permission.granted) {
+  if (Platform.OS !== 'web') {
+    if (!permission) {
+      return (
+        <View style={[styles.center, { backgroundColor: colors.background }]} testID="selfie-loading">
+          <ActivityIndicator size="large" />
+        </View>
+      );
+    }
+    if (!permission.granted) {
     return (
       <View style={[styles.center, { backgroundColor: colors.background }]} testID="selfie-denied">
         <Text style={[styles.title, { color: colors.text }]}>Camera access needed</Text>
@@ -248,8 +271,41 @@ export default function SelfieCapture() {
         >
           <Text style={[styles.buttonText, { color: colors.onPrimary }]}>Allow camera access</Text>
         </Pressable>
+        {permission.canAskAgain === false && (
+          <Pressable
+            style={[styles.button, { backgroundColor: colors.surface }]}
+            onPress={() => void Linking.openSettings().catch(() => undefined)}
+            testID="selfie-open-settings"
+          >
+            <Text style={[styles.buttonText, { color: colors.text }]}>Open Settings</Text>
+          </Pressable>
+        )}
+        {/* Library upload has the same quality bar — never trap a user who
+            declined (or permanently lost) camera access mid-funnel. */}
+        <Pressable
+          style={[styles.button, { backgroundColor: colors.surface }]}
+          onPress={() => void pickFromLibrary()}
+          disabled={busy === 'capture'}
+          testID="selfie-library-denied"
+        >
+          {busy === 'capture' ? (
+            <ActivityIndicator color={colors.text} />
+          ) : (
+            <Text style={[styles.buttonText, { color: colors.text }]}>Choose from library instead</Text>
+          )}
+        </Pressable>
+        <Pressable
+          onPress={() => {
+            setStep('quiz');
+            router.replace('/onboarding/quiz');
+          }}
+          testID="selfie-denied-back"
+        >
+          <Text style={[styles.consent, { color: colors.muted }]}>Back to quiz</Text>
+        </Pressable>
       </View>
     );
+    }
   }
 
   // P0 age gate: never mount the body-photo camera until DOB (+ 13–17
@@ -276,7 +332,9 @@ export default function SelfieCapture() {
     );
   }
 
-  // Web has no camera capture: upload panel instead of the CameraView.
+  // Web has no camera capture: show the upload panel WITHOUT the camera
+  // permission gate (expo-camera web starts ungranted; demanding camera access
+  // just to unlock a file upload trapped every web user who declined).
   if (Platform.OS === 'web' && !preview) {
     return (
       <View style={[styles.center, { backgroundColor: colors.background }]} testID="selfie-upload">
@@ -302,6 +360,13 @@ export default function SelfieCapture() {
             {FAIL_COPY[fail]}
           </Text>
         )}
+        {!!fail && fail !== 'upload_failed' && (
+          <Pressable onPress={() => setFail(null)} testID="selfie-use-anyway">
+            <Text style={[styles.fail, { color: colors.muted }]}>
+              Use this photo anyway — VAI re-checks it on upload
+            </Text>
+          </Pressable>
+        )}
         {!!error && !fail && (
           <Text style={[styles.fail, { color: colors.danger }]} testID="selfie-error">
             {error}
@@ -315,6 +380,10 @@ export default function SelfieCapture() {
     <View style={[styles.root, { backgroundColor: '#000' }]} testID="selfie-screen">
       {preview ? (
         <Image source={{ uri: preview }} style={styles.full} contentFit="contain" />
+      ) : Platform.OS === 'web' ? (
+        <View style={[styles.full, styles.webPrompt]} testID="selfie-web-prompt">
+          <Text style={styles.guideText}>Your photo appears here for review</Text>
+        </View>
       ) : (
         <CameraView ref={cameraRef} style={styles.full} facing="front">
           {/* Guide overlay: full-body silhouette frame */}
@@ -337,6 +406,13 @@ export default function SelfieCapture() {
             {FAIL_COPY[fail]}
           </Text>
         )}
+        {!!fail && fail !== 'upload_failed' && (
+          <Pressable onPress={() => setFail(null)} testID="selfie-use-anyway">
+            <Text style={[styles.fail, { color: colors.muted }]}>
+              Use this photo anyway — VAI re-checks it on upload
+            </Text>
+          </Pressable>
+        )}
         {!!error && !fail && (
           <Text style={[styles.fail, { color: colors.danger }]} testID="selfie-error">
             {error}
@@ -347,17 +423,20 @@ export default function SelfieCapture() {
         </Text>
         <Pressable
           onPress={() => {
+            if (busy === 'upload') return; // upload in flight — navigation would strand it
             setStep('quiz');
             router.replace('/onboarding/quiz');
           }}
           testID="selfie-back"
         >
-          <Text style={[styles.consent, { color: colors.muted }]}>← Back (photo is kept)</Text>
+          <Text style={[styles.consent, { color: colors.muted }]}>Back to quiz</Text>
         </Pressable>
         {preview ? (
           <View style={styles.row}>
             <Pressable style={[styles.button, styles.half, { backgroundColor: colors.surface }]} onPress={retake} testID="selfie-retake">
-              <Text style={[styles.buttonText, { color: colors.text }]}>Retake</Text>
+              <Text style={[styles.buttonText, { color: colors.text }]}>
+                {previewSource === 'library' ? 'Choose a different photo' : 'Retake'}
+              </Text>
             </Pressable>
             <Pressable
               style={[styles.button, styles.half, { backgroundColor: colors.primary }]}
@@ -408,6 +487,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 22, fontWeight: '700', textAlign: 'center' },
   body: { fontSize: 14, textAlign: 'center', lineHeight: 20 },
   guide: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 },
+  webPrompt: { backgroundColor: '#111', alignItems: 'center', justifyContent: 'center' },
   frame: { width: 220, height: 420, borderWidth: 2, borderRadius: 110, borderStyle: 'dashed' },
   checklist: { gap: 4 },
   guideText: { color: '#fff', fontSize: 14, fontWeight: '600', textAlign: 'center' },

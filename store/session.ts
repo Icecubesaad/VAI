@@ -60,8 +60,15 @@ interface SessionState {
   parentalConsent: boolean;
   parentalConsentAt: string | null;
   ageVerifiedAt: string | null;
+  /** Who the persisted funnel data (closet/quiz/base photo) belongs to. Set on
+   *  first sign-in; a DIFFERENT user signing in triggers the cross-user wipe
+   *  in auth.tsx so user B never resumes user A's funnel. */
+  funnelOwnerId: string | null;
 
   setAuth: (p: { userId: string; email: string | null }) => void;
+  setFunnelOwner: (userId: string | null) => void;
+  /** Session died (expired/revoked) but funnel progress + age gate survive. */
+  clearAuth: () => void;
   setReferralCode: (code: string | null) => void;
   setReferredBy: (code: string | null) => void;
   setReferralRedeemed: () => void;
@@ -95,6 +102,7 @@ const initial: Pick<
   | 'parentalConsent'
   | 'parentalConsentAt'
   | 'ageVerifiedAt'
+  | 'funnelOwnerId'
 > = {
   userId: null,
   email: null,
@@ -111,6 +119,7 @@ const initial: Pick<
   parentalConsent: false,
   parentalConsentAt: null,
   ageVerifiedAt: null,
+  funnelOwnerId: null,
 };
 
 type SessionPersisted = Pick<
@@ -130,13 +139,17 @@ type SessionPersisted = Pick<
   | 'parentalConsent'
   | 'parentalConsentAt'
   | 'ageVerifiedAt'
+  | 'funnelOwnerId'
 >;
 
 export const useSession = create<SessionState>()(
   persist<SessionState, [], [], SessionPersisted>(
-    (set) => ({
+    (set, get) => ({
       ...initial,
-      setAuth: ({ userId, email }) => set({ userId, email }),
+      setAuth: ({ userId, email }) =>
+        set({ userId, email, funnelOwnerId: get().funnelOwnerId ?? userId }),
+      setFunnelOwner: (funnelOwnerId) => set({ funnelOwnerId }),
+      clearAuth: () => set({ userId: null, email: null }),
       setReferralCode: (referralCode) => set({ referralCode }),
       setReferredBy: (referredBy) => set({ referredBy }),
       setReferralRedeemed: () => set({ referralRedeemed: true }),
@@ -177,6 +190,7 @@ export const useSession = create<SessionState>()(
         parentalConsent: s.parentalConsent,
         parentalConsentAt: s.parentalConsentAt,
         ageVerifiedAt: s.ageVerifiedAt,
+        funnelOwnerId: s.funnelOwnerId,
       }),
     },
   ),

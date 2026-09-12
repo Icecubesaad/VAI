@@ -41,14 +41,30 @@ export default function ClosetMin3() {
       setBusy(true);
       try {
         const userId = useSession.getState().userId;
-        if (!userId) throw new Error('auth');
+        if (!userId) {
+          setError('Sign in to continue your setup — your progress is saved.');
+          return;
+        }
         // 200KB budget enforced BEFORE upload (P1-1): WebP ≤1024px via the
         // shared pipeline. `garment_too_heavy` carries retake copy and is
         // surfaced as-is by the catch below — never silently uploaded raw.
         const compressed = await compressGarmentPhoto(uri);
-        const b64 = await FileSystem.readAsStringAsync(compressed.uri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
+        // Base64 the bytes: FileSystem on native, fetch fallback for web blob URIs.
+        let b64: string;
+        try {
+          b64 = await FileSystem.readAsStringAsync(compressed.uri, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+        } catch {
+          const fetched = await fetch(compressed.uri);
+          const buf = new Uint8Array(await fetched.arrayBuffer());
+          let bin = '';
+          const CHUNK = 0x8000;
+          for (let i = 0; i < buf.length; i += CHUNK) {
+            bin += String.fromCharCode(...buf.subarray(i, i + CHUNK));
+          }
+          b64 = btoa(bin);
+        }
         const path = `${userId}/${Date.now()}.webp`;
         const { error: upErr } = await supabase.storage
           .from(BUCKETS.garments)
@@ -139,10 +155,12 @@ export default function ClosetMin3() {
         quality: 0.9,
         allowsEditing: false,
         allowsMultipleSelection: false,
-        mediaTypes: ['images'],
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
       });
       if (picked.canceled || !picked.assets[0]?.uri) return;
-      await processUri(picked.assets[0].uri, 'camera');
+      // Library picks are provenance 'bulk', not 'camera' (wrong source was
+      // persisted for every garment added via this path).
+      await processUri(picked.assets[0].uri, 'bulk');
     } catch {
       setError('Could not open your photo library. Please try again.');
     }

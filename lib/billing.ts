@@ -136,19 +136,27 @@ async function loadPurchases(): Promise<PurchasesModule> {
   } catch {
     throw new BillingError(
       'not-configured',
-      'react-native-purchases is unavailable (needs EAS dev-client + `npx expo install react-native-purchases`).',
+      'Purchases are not available in this build yet — your free renders still work.',
     );
   }
 }
 
 function publicKey(): string {
+  if (Platform.OS === 'web') {
+    // In-app purchases don't exist on web — short-circuit with the honest
+    // not-configured error instead of falling through to the Android key.
+    throw new BillingError(
+      'not-configured',
+      'Purchases are available in the mobile app — your free renders work here.',
+    );
+  }
   const key = Platform.OS === 'ios'
     ? process.env['EXPO_PUBLIC_REVENUECAT_IOS_KEY']
     : process.env['EXPO_PUBLIC_REVENUECAT_ANDROID_KEY'];
   if (!key) {
     throw new BillingError(
       'not-configured',
-      `Missing ${Platform.OS === 'ios' ? 'EXPO_PUBLIC_REVENUECAT_IOS_KEY' : 'EXPO_PUBLIC_REVENUECAT_ANDROID_KEY'}.`,
+      'Purchases are not set up in this build yet — you can keep using free renders.',
     );
   }
   return key;
@@ -156,13 +164,38 @@ function publicKey(): string {
 
 /**
  * Configure RevenueCat + bind the app user id (call once after login).
- * Safe to call repeatedly for the same user; re-logs-in on user switch.
+ * RevenueCat's contract is configure-ONCE per launch; a subsequent account
+ * switch MUST go through `logIn` — re-calling `configure` is unsupported and
+ * can misattribute purchases across accounts on a shared device.
  */
 export async function initBilling(appUserId: string): Promise<void> {
   const Purchases = await loadPurchases();
-  if (configuredUserId !== appUserId) {
+  if (configuredUserId === null) {
     Purchases.configure({ apiKey: publicKey(), appUserID: appUserId });
     configuredUserId = appUserId;
+  } else if (configuredUserId !== appUserId) {
+    try {
+      await Purchases.logIn(appUserId);
+    } catch {
+      // logIn can fail while offline — keep the previous attribution rather
+      // than risk a misconfigured SDK; the next sign-in retries.
+      return;
+    }
+    configuredUserId = appUserId;
+  }
+}
+
+/**
+ * Detach RevenueCat from the signed-out user (logout). Never throws — a
+ * failed logOut must not block the rest of the logout wipe.
+ */
+export async function logOutBilling(): Promise<void> {
+  if (configuredUserId === null) return;
+  try {
+    const Purchases = await loadPurchases();
+    await Purchases.logOut();
+  } catch {
+    // Best-effort; configuredUserId stays so a later sign-in still switches.
   }
 }
 

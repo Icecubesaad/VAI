@@ -23,6 +23,7 @@ import {
 } from '@/lib/perf';
 import { useSession } from '@/store/session';
 import { usePaywall } from '@/store/paywall';
+import { registerPushToken } from '@/lib/push';
 
 // Perf loading recipe (CONTRACT-perf.md + APP-LOADING-SPLASH.md): mark launch
 // + hold the OS splash BEFORE first render. `awaitAppReady` hides the splash
@@ -50,7 +51,9 @@ function extractReferralCode(url: string): string | null {
     typeof qp?.code === 'string' ? qp.code : typeof qp?.ref === 'string' ? qp.ref : null;
   if (qpCode && qpCode.length >= 3) return qpCode;
   const segs = (parsed.path ?? '').split('/').filter(Boolean);
-  // Matches "r/CODE" on either the vai:// scheme or the https vai.style link.
+  // "vai://r/CODE" parses with hostname "r" and path "CODE" (expo-linking);
+  // "https://vai.style/r/CODE" parses with hostname "vai.style" and path "r/CODE".
+  if (parsed.hostname?.toLowerCase() === 'r' && segs[0]) return segs[0];
   if (segs.length >= 2 && segs[0]?.toLowerCase() === 'r' && segs[1]) return segs[1];
   return null;
 }
@@ -131,15 +134,25 @@ function useDeepLinks(onUrl: (url: string) => void) {
  * Monday) and `reel` (dateless fallback `vai://reel`). All other push kinds
  * keep their existing behavior (untouched).
  */
-function usePushRouter(onReelRoute: (route: DeepRoute) => void) {
+function usePushRouter(
+  onReelRoute: (route: DeepRoute) => void,
+  onRenderRoute: (renderId: string) => void,
+) {
   useEffect(() => {
     const unsub = addNotificationRouter({
       onDeepLink: (route) => {
+        // render-ready taps were previously dropped here — the user paid a
+        // credit and the finished render was invisible until they scrolled.
+        if (route.screen === 'tryon') {
+          const renderId = route.params['renderId'];
+          if (renderId) onRenderRoute(renderId);
+          return;
+        }
         if (route.screen === 'outfit' || route.screen === 'reel') onReelRoute(route);
       },
     });
     return unsub;
-  }, [onReelRoute]);
+  }, [onReelRoute, onRenderRoute]);
 }
 
 /**
@@ -224,7 +237,17 @@ export default function RootLayout() {
     },
     [routeReelWeek],
   );
-  usePushRouter(handlePushRoute);
+  const routeRenderResult = useCallback(
+    (renderId: string) => {
+      if (readyRef.current) {
+        router.push({ pathname: '/(tabs)/tryon', params: { renderId } });
+      } else {
+        pendingRenderRef.current = renderId; // boot gate routes it post-paint
+      }
+    },
+    [router],
+  );
+  usePushRouter(handlePushRoute, routeRenderResult);
 
   // Supabase auth events → session store (boot-time session comes from the gate below).
   // Gated: without credentials there is no client to subscribe to.
@@ -232,9 +255,25 @@ export default function RootLayout() {
     if (!isBackendConfigured()) return;
     let unsubscribe: (() => void) | null = null;
     try {
-      const { data: sub } = getSupabase().auth.onAuthStateChange((_event, session) => {
+      const { data: sub } = getSupabase().auth.onAuthStateChange((event, session) => {
         const u = session?.user;
-        if (u) useSession.getState().setAuth({ userId: u.id, email: u.email ?? null });
+        if (u) {
+          useSession.getState().setAuth({ userId: u.id, email: u.email ?? null });
+        } else if (event === 'SIGNED_OUT') {
+          // Session death while running (explicit logout or refresh-token
+          // revocation): clear the dead identity — analytics, idempotency
+          // keys and push-token saves all consume userId — and route back to
+          // auth instead of letting every call 401 behind a signed-in UI.
+          useSession.getState().clearAuth();
+          if (useSession.getState().onboardingStep === 'done') {
+            useSession.getState().setOnboardingStep('auth');
+            try {
+              router.replace('/onboarding/auth');
+            } catch {
+              /* router not mounted yet — boot gate routes on next start */
+            }
+          }
+        }
       });
       unsubscribe = () => sub.subscription.unsubscribe();
     } catch {
@@ -276,7 +315,30 @@ export default function RootLayout() {
           lastPushReelLink(),
         ]);
         const u = sessionRes?.data.session?.user;
-        if (u) useSession.getState().setAuth({ userId: u.id, email: u.email ?? null });
+        if (u) {
+          useSession.getState().setAuth({ userId: u.id, email: u.email ?? null });
+          // Push registration was previously never called anywhere — no token
+          // ever reached push_tokens, so render-ready pushes could not fire.
+          // Fire-and-forget: permission prompt only on first run; the server
+          // upsert (merge-duplicates) is idempotent on (user, token).
+          void registerPushToken({ userId: u.id }).catch(() => undefined);
+        } else {
+          // Ghost-funnel guard: persisted MMKV can resume mid-funnel (quiz /
+          // selfie / closet / paywall) with no session — every backend call
+          // then 401s ("sign in to continue" on screens the user already
+          // passed). Bounce to auth once, honestly, instead of the cascade.
+          const step = useSession.getState().onboardingStep;
+          if (
+            step === 'quiz' ||
+            step === 'selfie' ||
+            step === 'closet' ||
+            step === 'firstOutfit' ||
+            step === 'paywall'
+          ) {
+            useSession.getState().setOnboardingStep('auth');
+            useSession.getState().clearAuth();
+          }
+        }
         if (initialUrl) handleUrl(initialUrl);
         // Killed-state Monday-push tap: same reel routing via the stashed week.
         if (pushLink) handleUrl(pushLink);

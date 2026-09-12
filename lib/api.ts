@@ -142,6 +142,8 @@ export type Tier = 'free' | 'trial' | 'premium';
 export interface PaywallStatus {
   tier: Tier;
   trialEndsAt: string | null;
+  /** Server-minted share code (users.referral_code) for the watermark. */
+  referralCode: string | null;
   /** Free: lifetime renders remaining out of 5. Premium: monthly remaining out of 30. */
   rendersLeft: number;
   /** Lifetime cap accounting (free tier). */
@@ -692,6 +694,7 @@ function mapPaywallStatus(res: unknown): PaywallStatus {
   return {
     tier,
     trialEndsAt: pickStr(r['trialEndsAt'], r['trial_ends_at']),
+    referralCode: pickStr(r['referralCode'], r['referral_code']),
     rendersLeft,
     // Server is quota truth; the mirror converges on every fetchStatus.
     // Premium never consults the free lifetime pool (mark it exhausted so a
