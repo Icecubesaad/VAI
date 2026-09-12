@@ -449,7 +449,6 @@ export default function RootLayout() {
               <Stack.Screen name="index" />
               <Stack.Screen name="(tabs)" />
               <Stack.Screen name="onboarding" />
-              <Stack.Screen name="pose-pack" />
               <Stack.Screen name="pinterest-connect" />
               <Stack.Screen name="pinterest-boards" />
             </Stack>

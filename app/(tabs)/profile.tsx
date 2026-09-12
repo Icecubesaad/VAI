@@ -304,16 +304,6 @@ export default function ProfileScreen() {
         />
       </View>
 
-      {/* Pose pack (powers the Monday reel: front / step / detail) */}
-      <Pressable
-        style={[styles.row, { borderColor: colors.border }]}
-        onPress={() => router.push('/pose-pack')}
-        testID="profile-pose-pack"
-      >
-        <Text style={[styles.rowText, { color: colors.text }]}>Pose pack (3 poses)</Text>
-        <Text style={[styles.chev, { color: colors.muted }]}>›</Text>
-      </Pressable>
-
       {/* Danger zone (Pinterest disconnect lives in the InspirationRow above —
           sibling hit-area, server-purge-first; local taste clears only after
           the server confirms). */}

@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { ViewToken } from 'react-native';
-import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { FlashList } from '@shopify/flash-list';
 import NetInfo from '@react-native-community/netinfo';
 import { useTheme } from '@/theme';
@@ -37,8 +37,6 @@ import { useTaste } from '@/store/taste';
 import { useTastePrefs } from '@/store/taste-prefs';
 import {
   MAX_REGENERATES_PER_WEEK,
-  fetchPoseStatus,
-  missingPoses,
   mondayOf,
   useReel,
 } from '@/store/reel';
@@ -103,14 +101,13 @@ type ReelPagerRowProps = {
   card: ReelCardData;
   pageH: number;
   garmentThumbs: Record<string, string>;
-  quotaLeft: number;
-  quotaCap: number;
-  onWear: (card: ReelCardData) => void;
+  garmentNames: Record<string, string>;
+  index: number;
+  count: number;
+  active: boolean;
   onTry: (card: ReelCardData) => void;
-  onShop: (card: ReelCardData) => void;
   onSave: (cardId: string) => void;
   onRegenerate: (card: ReelCardData) => void;
-  onUpgrade: () => void;
 };
 
 /**
@@ -124,36 +121,32 @@ const ReelPagerRow = memo(function ReelPagerRow({
   card,
   pageH,
   garmentThumbs,
-  quotaLeft,
-  quotaCap,
-  onWear,
+  garmentNames,
+  index,
+  count,
+  active,
   onTry,
-  onShop,
   onSave,
   onRegenerate,
-  onUpgrade,
 }: ReelPagerRowProps): React.JSX.Element {
   const saved = useReel((s) => s.savedIds[card.id] === true);
   const loading = useReel((s) => s.regeneratingId === card.id);
-  const handleWear = useCallback(() => onWear(card), [onWear, card]);
   const handleTry = useCallback(() => onTry(card), [onTry, card]);
-  const handleShop = useCallback(() => onShop(card), [onShop, card]);
   const handleSave = useCallback(() => onSave(card.id), [onSave, card.id]);
   const handleRegenerate = useCallback(() => onRegenerate(card), [onRegenerate, card]);
   return (
     <View style={{ height: pageH }} testID={`reel-page-${card.id}`}>
       <ReelCard
         card={card}
-        onWear={handleWear}
         onTry={handleTry}
-        onShop={handleShop}
         onSave={handleSave}
         onRegenerate={handleRegenerate}
         saved={saved}
         garmentThumbs={garmentThumbs}
-        quotaLeft={quotaLeft}
-        quotaCap={quotaCap}
-        onUpgrade={onUpgrade}
+        garmentNames={garmentNames}
+        index={index}
+        count={count}
+        active={active}
         loading={loading}
         testID={`reel-card-${card.id}`}
       />
@@ -180,13 +173,8 @@ export default function ReelScreen() {
   const refreshWeek = useReel((s) => s.refreshWeek);
   const styleMyWeek = useReel((s) => s.styleMyWeek);
   const toggleSave = useReel((s) => s.toggleSave);
-  const quotaLeft = usePaywall((s) => s.rendersLeft);
-  const quotaCap = usePaywall((s) => (s.tier === 'free' ? s.lifetimeCap : s.monthlyCap));
 
-  const [poses, setPoses] = useState<Record<ReelPose, boolean> | null>(null);
-  /** Pose-status fetch failed — a retry state, NOT "all poses missing" (the
-   *  old catch mapped a transient error to the pose-gate, locking the reel). */
-  const [poseError, setPoseError] = useState(false);
+
   const [listH, setListH] = useState<number | null>(null);
   const [wearError, setWearError] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
@@ -251,18 +239,6 @@ export default function ReelScreen() {
   }, [ensureWeek, weekOf]);
   useEffect(load, [load]);
 
-  const refetchPoses = useCallback(() => {
-    setPoseError(false);
-    void fetchPoseStatus().then(
-      (p) => setPoses(p),
-      () => setPoseError(true),
-    );
-  }, []);
-  // Pose status is fetched once on mount — completing the pose pack and
-  // returning to this (still-mounted) tab left stale all-false poses and a
-  // dead-end loop. Refetch on every focus instead.
-  useFocusEffect(refetchPoses);
-
 
   // Open attribution (once per mount) + snapshot whether the drop was already
   // cached (drives the TTI `from_cache` budget split).
@@ -322,7 +298,7 @@ export default function ReelScreen() {
   // the server-authoritative cost sum (REQUIRED props — pending-card estimates
   // excluded via dropCostUsd, flagged estimated vs final).
   useEffect(() => {
-    if (!cards || cards.length === 0 || poses === null) return;
+    if (!cards || cards.length === 0) return;
     if (!ttiReportedRef.current) {
       ttiReportedRef.current = true;
       reportReelTti(Date.now() - mountMsRef.current, { fromCache: ttiFromCacheRef.current });
@@ -342,7 +318,7 @@ export default function ReelScreen() {
         });
       }
     }
-  }, [cards, poses, weekOf]);
+  }, [cards, weekOf]);
 
   const garmentThumbs = useMemo(() => {
     const map: Record<string, string> = {};
@@ -350,11 +326,20 @@ export default function ReelScreen() {
     return map;
   }, [garments]);
 
+  // Real piece names (closet categories) — the reel card title.
+  const garmentNames = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const g of garments) map[g.id] = g.category.charAt(0).toUpperCase() + g.category.slice(1);
+    return map;
+  }, [garments]);
+
+  const [activeIndex, setActiveIndex] = useState(0);
   const onViewableItemsChanged = useCallback(
     ({ viewableItems }: { viewableItems: ViewToken[] }) => {
       const first = viewableItems[0];
       const idx = typeof first?.index === 'number' ? first.index : 0;
       lastIndexRef.current = idx;
+      setActiveIndex(idx);
       // Same-page repeats (settling, re-layout) skip the prefetch window
       // rebuild — the ±1 window for this index is already in flight/cached.
       if (idx !== updatedIndexRef.current) {
@@ -397,46 +382,6 @@ export default function ReelScreen() {
     }
   }, []);
 
-  // Wear-it-today → `increment_wear` RPC + local mirror (wear counts + CPW
-  // update instantly) + worn mark. Failures surface inline, never silent.
-  const handleWear = useCallback((card: ReelCardData) => {
-    if (wornRef.current.has(card.id) || wearBusyRef.current.has(card.id)) return;
-    wearBusyRef.current.add(card.id);
-    setWearError(null);
-    void (async () => {
-      try {
-        const { error } = await supabase.rpc('increment_wear', { ids: card.garmentIds });
-        if (error) throw error;
-        const st = useCloset.getState();
-        for (const gid of card.garmentIds) {
-          const g = st.items[gid];
-          if (g) {
-            const wearCount = g.wearCount + 1;
-            st.upsert({
-              ...g,
-              wearCount,
-              costPerWear: g.pricePaid != null ? g.pricePaid / wearCount : null,
-            });
-          }
-        }
-        wornRef.current.add(card.id);
-        const uid = useSession.getState().userId;
-        if (uid) {
-          track('reel_wear_it_today', {
-            user_id: uid,
-            tier: toAnalyticsTier(usePaywall.getState().tier),
-            date: new Date().toISOString().slice(0, 10),
-            pose: card.pose,
-          });
-        }
-      } catch {
-        setWearError('Could not log this outfit. Check your connection and try again.');
-      } finally {
-        wearBusyRef.current.delete(card.id);
-      }
-    })();
-  }, []);
-
   // Try → try-on studio with the card's render context (real outfit id only;
   // the studio falls back to garment_refs when it is absent).
   const handleTry = useCallback(
@@ -453,49 +398,6 @@ export default function ReelScreen() {
   );
 
   // Shop → shop tab scoped to the card's outfit (gap items) + shop-tap event.
-  const handleShop = useCallback(
-    (card: ReelCardData) => {
-      const uid = useSession.getState().userId;
-      if (uid) {
-        const idx = dataRef.current.findIndex((c) => c.id === card.id);
-        track('reel_shop_tap', {
-          user_id: uid,
-          tier: toAnalyticsTier(usePaywall.getState().tier),
-          ...(idx >= 0 ? { card_index: idx } : {}),
-        });
-      }
-      router.push({
-        pathname: '/(tabs)/shop',
-        params: { ...(card.outfitId ? { outfitId: card.outfitId } : {}) },
-      });
-    },
-    [router],
-  );
-
-  // Save → local MMKV truth (persisted across reinstalls). NOTE: the
-  // `post_saves` table is social-feed scope (docs/SECURITY.md §1 — v2), so
-  // there is no v1 server row for a reel card; local is the source of truth.
-  const handleSave = useCallback(
-    (cardId: string) => {
-      toggleSave(cardId);
-    },
-    [toggleSave],
-  );
-
-  // Regenerate entry: offline gate first (perf recipe), then render-quota
-  // gate (1 credit — exhausted render pool routes to paywall), then the
-  // weekly remix budget mirror (server is truth, 3/wk).
-  const openRegen = useCallback((card: ReelCardData) => {
-    if (!canRegenerateReelCard(onlineRef.current)) {
-      setBanner(COPY_REEL_OFFLINE_REGENERATE);
-      return;
-    }
-    setBanner(null);
-    setRegenNote('');
-    setRegenError(null);
-    setRegenTarget(card);
-  }, []);
-
   const regenBusy = regenTarget !== null && regeneratingId === regenTarget.id;
   // Auto pose for the remix: fresh taste pin wins, else the user's own pose.
   const regenFreshPin = regenTarget !== null ? (poseRefs[0] ?? null) : null;
@@ -562,7 +464,7 @@ export default function ReelScreen() {
   }, [regenTarget, regeneratingId, regenNote, regenPose, regenPoseRef, router]);
 
   // "Style my week" → POST reel-drop. Client pre-gate (P2-5, mirrors the
-  // regen path): offline → banner, missing poses → pose-pack, exhausted
+  // regen path): offline → banner, exhausted
   // render pool → paywall — so exhausted users get the upsell sheet instead
   // of a generic fetch error. weekly_drop_started carries the
   // server-authoritative cost sum (REQUIRED — pending estimates excluded).
@@ -570,10 +472,6 @@ export default function ReelScreen() {
     if (fetching) return; // double-tap = two reel-drops = 7 renders each
     if (!onlineRef.current) {
       setBanner(COPY_REEL_OFFLINE_REGENERATE);
-      return;
-    }
-    if (poses && missingPoses(poses).length > 0) {
-      router.push('/pose-pack');
       return;
     }
     const paywall = usePaywall.getState();
@@ -601,53 +499,48 @@ export default function ReelScreen() {
         });
       }
     })();
-  }, [styleMyWeek, weekOf, poses, router, fetching]);
+  }, [styleMyWeek, weekOf, router, fetching]);
 
-  const handleUpgrade = useCallback(() => {
-    router.push('/onboarding/paywall');
-  }, [router]);
+  const handleSave = useCallback(
+    (cardId: string) => {
+      void toggleSave(cardId);
+    },
+    [toggleSave],
+  );
+  const openRegen = useCallback((card: ReelCardData) => {
+    setRegenTarget(card);
+    setRegenNote('');
+    setRegenError(null);
+  }, []);
 
   // Thin + stable: every callback prop is screen-stable, so FlashList rows
   // keep their memo across scrolls. Per-row variance (saved/loading) is
   // subscribed inside ReelPagerRow, not threaded through here.
   const renderItem = useCallback(
-    ({ item }: { item: ReelCardData }) => (
+    ({ item, index }: { item: ReelCardData; index: number }) => (
       <ReelPagerRow
         card={item}
         pageH={pageH}
         garmentThumbs={garmentThumbs}
-        quotaLeft={quotaLeft}
-        quotaCap={quotaCap}
-        onWear={handleWear}
+        garmentNames={garmentNames}
+        index={index}
+        count={cards?.length ?? 0}
+        active={index === activeIndex}
         onTry={handleTry}
-        onShop={handleShop}
         onSave={handleSave}
         onRegenerate={openRegen}
-        onUpgrade={handleUpgrade}
       />
     ),
-    [
-      pageH,
-      garmentThumbs,
-      quotaLeft,
-      quotaCap,
-      handleWear,
-      handleTry,
-      handleShop,
-      handleSave,
-      openRegen,
-      handleUpgrade,
-    ],
+    [pageH, garmentThumbs, garmentNames, cards, activeIndex, handleTry, handleSave, openRegen],
   );
 
   // External deps renderItem closes over (FlashList PureComponent contract:
   // rows re-render when data items change OR this reference changes).
   const pagerExtra = useMemo(
-    () => ({ pageH, garmentThumbs, quotaLeft, quotaCap }),
-    [pageH, garmentThumbs, quotaLeft, quotaCap],
+    () => ({ pageH, garmentThumbs }),
+    [pageH, garmentThumbs],
   );
 
-  const missing = poses ? missingPoses(poses) : [];
   const tierLabel =
     drop && cachedWeek === weekOf ? (drop.tier === 'teaser' ? ', teaser' : ', full drop') : '';
 
@@ -689,25 +582,9 @@ export default function ReelScreen() {
         </Text>
       )}
 
-      {poses === null || (fetching && cards === null) ? (
+      {fetching && cards === null ? (
         <View style={styles.list} testID="reel-loading">
           <ReelSkeleton />
-        </View>
-      ) : poseError ? (
-        <View style={styles.body} testID="reel-pose-error">
-          <ErrorView
-            message="Could not check your pose pack. Check your connection and try again."
-            onRetry={refetchPoses}
-          />
-        </View>
-      ) : missing.length > 0 ? (
-        <View style={styles.body} testID="reel-pose-empty">
-          <EmptyState
-            title="Your reel needs 3 poses"
-            body={`Capture ${missing.join(', ')} to unlock full-body weekly looks styled for you.`}
-            actionTitle="Capture pose pack"
-            onAction={() => router.push('/pose-pack')}
-          />
         </View>
       ) : fetchError && cards === null ? (
         <View style={styles.body} testID="reel-error">
@@ -717,7 +594,7 @@ export default function ReelScreen() {
         <View style={styles.body} testID="reel-drop-empty">
           <EmptyState
             title="No drop yet this week"
-            body="Fresh looks land every Monday. Style your week now — seven outfits, three poses."
+            body="Fresh looks land every Monday. Style your week now — seven outfits styled on your photo."
             actionTitle={fetching ? 'Styling…' : 'Style my week'}
             onAction={handleStyleWeek}
             actionLoading={fetching}

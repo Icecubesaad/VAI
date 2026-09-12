@@ -202,12 +202,14 @@ function providerChain(tier: PipelineTier): string[] {
 function providerCostUsd(provider: string): number {
   if (provider === "fashn-max") return FASHN_MAX_COST_USD;
   if (provider === "fashn-std") return FASHN_STD_COST_USD;
+  // Lite primary ≈ $0.005/img; the (paid) flash-image fallback costs more.
+  if (provider === GEMINI_FLASH_IMAGE) return 0.005;
   return GEMINI_STD_COST_USD;
 }
 
 function providerLabel(provider: string): string {
-  if (provider === GEMINI_FLASH_IMAGE) return "gemini-flash";
-  if (provider === GEMINI_PRO_IMAGE) return "gemini-pro";
+  if (provider === GEMINI_FLASH_IMAGE) return "gemini-flash-lite";
+  if (provider === GEMINI_PRO_IMAGE) return "gemini-flash";
   return provider;
 }
 

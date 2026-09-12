@@ -3,8 +3,13 @@
 // fallback for image work; a Flash text model for outfit reasoning/auto-tag/quiz.
 // All server-side only — GEMINI_API_KEY never leaves Edge Function secrets.
 
-export const GEMINI_FLASH_IMAGE = "gemini-3.1-flash-image";
-export const GEMINI_PRO_IMAGE = "gemini-3-pro-image";
+// Primary = Nano Banana 2 LITE (gemini-3.1-flash-lite-image): the cheapest
+// image model (~$0.005/img) — founder runs without billing attached today, so
+// the chain must start at the cheapest viable model and only fall upward.
+// Override with GEMINI_IMAGE_MODEL. Free-tier quota for ALL image models is
+// currently 0 (verified against the live API), so renders stay quota-gated.
+export const GEMINI_FLASH_IMAGE = Deno.env.get("GEMINI_IMAGE_MODEL") ?? "gemini-3.1-flash-lite-image";
+export const GEMINI_PRO_IMAGE = "gemini-3.1-flash-image";
 /**
  * Overridable via env; README pins "Gemini Flash" for text/vision reasoning.
  * Default `gemini-2.5-flash`: stable AND on the Gemini API free tier (the

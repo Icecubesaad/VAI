@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/theme';
 import { ShareCard } from '@/components';
@@ -7,25 +7,68 @@ import { api, apiErrorCopy, type QuizAnswers } from '@/lib/api';
 import { useQuiz, QUIZ_STEPS, type QuizStepKey } from '@/store/quiz';
 import { useSession } from '@/store/session';
 
-const OPTIONS: Record<QuizStepKey, { key: keyof QuizAnswers; choices: string[] }> = {
-  style: { key: 'everydayStyle', choices: ['Minimal', 'Streetwear', 'Classic', 'Boho', 'Sporty', 'Bold'] },
-  palette: { key: 'palette', choices: ['Neutrals', 'Earth tones', 'Pastels', 'Dark & moody', 'Bright & bold'] },
-  dressCode: { key: 'dressCode', choices: ['Casual', 'Smart casual', 'Business', 'Creative', 'Uniformed'] },
-  boldness: { key: 'boldness', choices: ['1', '2', '3', '4', '5'] },
-  budget: { key: 'budgetBand', choices: ['Under $50', '$50–$150', '$150–$300', '$300+'] },
+/**
+ * Style catalog — curated personas per side. Product copy (real options the
+ * stylist prompt and shop picks consume), never fabricated results.
+ */
+const MENSWEAR = [
+  'Streetwear', 'Old Money', 'Minimal', 'Techwear', 'Tailored',
+  'Smart casual', 'Athleisure', 'Vintage', 'Denim & Boots', 'Gorpcore',
+];
+const WOMENSWEAR = [
+  'Clean girl', 'Old Money', 'Minimalist', 'Coquette', 'Streetwear',
+  'Boho', 'Y2K', 'Cottagecore', 'Office chic', 'Athleisure',
+];
+
+const COUNTRIES = [
+  'United States', 'United Kingdom', 'Canada', 'Australia', 'New Zealand',
+  'India', 'Pakistan', 'Bangladesh', 'Japan', 'South Korea', 'China',
+  'Singapore', 'Indonesia', 'Philippines', 'Vietnam', 'UAE', 'Saudi Arabia',
+  'Turkey', 'Germany', 'France', 'Italy', 'Spain', 'Portugal',
+  'Netherlands', 'Sweden', 'Norway', 'Denmark', 'Poland', 'Switzerland',
+  'Ireland', 'Brazil', 'Mexico', 'Argentina', 'Chile', 'South Africa',
+  'Nigeria', 'Kenya', 'Egypt',
+];
+
+const OCCUPATIONS = [
+  'Student', 'Working professional', 'Remote worker',
+  'Creative / artist', 'Athlete / fitness', 'Retail & hospitality',
+  'Retired', 'Other',
+];
+
+const LIKES = [
+  'Gym & training', 'Going out', 'Travel', 'Office',
+  'Outdoors & hiking', 'Coffee & casual', 'Sports events',
+  'Music & festivals', 'Studying', 'Photography',
+];
+
+const CHOICES: Partial<Record<QuizStepKey, string[]>> = {
+  palette: ['Neutrals', 'Earth tones', 'Pastels', 'Dark & moody', 'Bright & bold'],
+  dressCode: ['Casual', 'Smart casual', 'Business', 'Creative', 'Uniformed'],
+  boldness: ['1', '2', '3', '4', '5'],
+  budget: ['Under $50', '$50–$150', '$150–$300', '$300+'],
 };
 
-const STEP_LABEL: Record<QuizStepKey, { title: string; hint: string }> = {
-  style: { title: 'Your everyday style?', hint: 'Pick all that fit — up to 3.' },
-  palette: { title: 'Colors you reach for?', hint: 'Pick all that fit — up to 3.' },
-  dressCode: { title: 'Typical dress code?', hint: 'Pick all that fit — up to 3.' },
-  boldness: { title: 'How bold? (1–5)', hint: '1 = quiet classics, 5 = main-character energy.' },
-  budget: { title: 'Budget per piece?', hint: 'Gap picks respect this band.' },
+const STEP_LABEL: Record<QuizStepKey, { kicker: string; title: string; hint: string }> = {
+  gender: { kicker: 'Your side of the catalog', title: 'Who are we styling?', hint: 'Pick one — it shapes every look.' },
+  style: { kicker: 'Style catalog', title: 'Pick your personas', hint: 'Up to 3 — this is your style DNA.' },
+  palette: { kicker: 'Color', title: 'Colors you reach for?', hint: 'Up to 3.' },
+  dressCode: { kicker: 'Dress code', title: 'How do most days look?', hint: 'Up to 3.' },
+  boldness: { kicker: 'Boldness', title: 'How bold?', hint: '1 = quiet classics · 5 = main-character energy.' },
+  budget: { kicker: 'Budget', title: 'Budget per piece?', hint: 'Gap picks respect this band.' },
+  about: { kicker: 'About you', title: 'A little about you', hint: 'Country, day-to-day, and what you love — AI tailors everything to it.' },
 };
 
-/** Steps that accept multiple picks (stored comma-joined, server-compatible). */
 const MULTI_STEPS: ReadonlySet<QuizStepKey> = new Set(['style', 'palette', 'dressCode']);
 const MULTI_MAX = 3;
+const LIKES_MAX = 4;
+
+/** Quiz step key → the answers field it persists to. */
+function storeKeyFor(k: QuizStepKey): keyof QuizAnswers {
+  if (k === 'style') return 'everydayStyle';
+  if (k === 'budget') return 'budgetBand';
+  return k as keyof QuizAnswers;
+}
 
 function splitPicks(raw: string | number | undefined): string[] {
   if (raw === undefined || raw === null) return [];
@@ -36,8 +79,9 @@ function splitPicks(raw: string | number | undefined): string[] {
 }
 
 /**
- * 5-step quiz (style, palette, dress-code, boldness slider, budget) →
- * quiz-score edge fn → DNA teaser card (shareable, watermarked).
+ * 7-step style onboarding: catalog side → personas → palette → dress code →
+ * boldness → budget → about-you (country / occupation / likes). Scored by the
+ * quiz-score edge fn (free Gemini text) into the DNA teaser card.
  */
 export default function QuizScreen() {
   const router = useRouter();
@@ -52,26 +96,38 @@ export default function QuizScreen() {
   const skipWithDefaults = useQuiz((s) => s.skipWithDefaults);
   const result = useQuiz((s) => s.result);
   const setStep = useSession((s) => s.setOnboardingStep);
-  // Own referral code feeds the ShareCard watermark (vai.style/r/<code>);
-  // null until the server issues one → ShareCard falls back to generic stamp.
   const referralCode = useSession((s) => s.referralCode);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const stepKey: QuizStepKey = QUIZ_STEPS[stepIndex] ?? 'style';
-  const { key, choices } = OPTIONS[stepKey];
+  const stepKey: QuizStepKey = QUIZ_STEPS[stepIndex] ?? 'gender';
   const isLast = stepIndex === QUIZ_STEPS.length - 1;
   const isMulti = MULTI_STEPS.has(stepKey);
-  const picks = isMulti ? splitPicks(answers[key] as string | number | undefined) : [];
-  const selected = answers[key];
+  const choices = stepKey === 'gender'
+    ? ['Menswear', 'Womenswear']
+    : stepKey === 'style'
+      ? (String(answers.gender) === 'Womenswear' ? WOMENSWEAR : MENSWEAR)
+      : (CHOICES[stepKey] ?? []);
+  const picks = splitPicks(answers[stepKey === 'style' ? 'everydayStyle' : (stepKey as keyof QuizAnswers)] as string | number | undefined);
+  const likes = splitPicks(answers.interests);
+  const label = STEP_LABEL[stepKey];
+
+  const canContinue =
+    stepKey === 'gender' ? Boolean(answers.gender)
+    : stepKey === 'style' ? splitPicks(answers.everydayStyle).length > 0
+    : stepKey === 'palette' ? Boolean(answers.palette)
+    : stepKey === 'dressCode' ? Boolean(answers.dressCode)
+    : stepKey === 'boldness' ? answers.boldness !== undefined
+    : stepKey === 'budget' ? Boolean(answers.budgetBand)
+    : Boolean(answers.country && answers.occupation); // about
 
   const choose = useCallback(
     (choice: string) => {
       setError(null);
       if (isMulti) {
-        // Toggle within the comma-joined string (server reads joined values).
-        const current = splitPicks(answers[key] as string | number | undefined);
+        const storeKey = storeKeyFor(stepKey);
+        const current = splitPicks(answers[storeKey] as string | number | undefined);
         const nextPicks = current.includes(choice)
           ? current.filter((p) => p !== choice)
           : current.length >= MULTI_MAX
@@ -81,25 +137,47 @@ export default function QuizScreen() {
           setError(`Up to ${MULTI_MAX} — unpick one to change it.`);
           return;
         }
-        setAnswer(key, nextPicks.join(', ') as never);
+        setAnswer(storeKey, nextPicks.join(', ') as never);
         return;
       }
-      const value = key === 'boldness' ? Number(choice) : choice;
-      setAnswer(key, value as never);
-      if (!isLast) next();
+      const value = stepKey === 'boldness' ? Number(choice) : choice;
+      const storeKey = (stepKey === 'gender' ? 'gender' : stepKey === 'budget' ? 'budgetBand' : stepKey) as keyof QuizAnswers;
+      setAnswer(storeKey, value as never);
+      if (!isLast && stepKey !== 'gender') next();
+      if (stepKey === 'gender') next(); // catalog side → personas
     },
-    [key, isLast, isMulti, next, setAnswer, answers],
+    [stepKey, isMulti, isLast, next, setAnswer, answers],
+  );
+
+  const toggleLike = useCallback(
+    (like: string) => {
+      const current = splitPicks(answers.interests);
+      const nextPicks = current.includes(like)
+        ? current.filter((p) => p !== like)
+        : current.length >= LIKES_MAX
+          ? current
+          : [...current, like];
+      setAnswer('interests', nextPicks.join(', ') as never);
+    },
+    [answers.interests, setAnswer],
   );
 
   const submit = useCallback(async () => {
     const complete: QuizAnswers = {
+      gender: String(answers.gender ?? ''),
       everydayStyle: String(answers.everydayStyle ?? ''),
       palette: String(answers.palette ?? ''),
       dressCode: String(answers.dressCode ?? ''),
       boldness: Number(answers.boldness ?? 3),
       budgetBand: String(answers.budgetBand ?? ''),
+      country: String(answers.country ?? ''),
+      occupation: String(answers.occupation ?? ''),
+      interests: String(answers.interests ?? ''),
     };
-    if (!complete.everydayStyle || !complete.palette || !complete.dressCode || !complete.budgetBand) {
+    if (
+      !complete.everydayStyle || !complete.palette || !complete.dressCode ||
+      !complete.budgetBand || !complete.gender || !complete.country || !complete.occupation
+    ) {
       setError('Answer every step so your DNA is accurate — go back if you skipped one.');
       return;
     }
@@ -115,22 +193,19 @@ export default function QuizScreen() {
     }
   }, [answers, setResult]);
 
-  const goSelfie = useCallback(() => {
-    setStep('selfie');
-    router.replace('/onboarding/selfie-capture');
-  }, [router, setStep]);
-
-  // Skippable → neutral defaults, then straight to the selfie step. State
-  // persists in MMKV so Back never loses answers.
   const skipQuiz = useCallback(() => {
     skipWithDefaults();
     setStep('selfie');
     router.replace('/onboarding/selfie-capture');
   }, [router, setStep, skipWithDefaults]);
 
+  const goSelfie = useCallback(() => {
+    setStep('selfie');
+    router.replace('/onboarding/selfie-capture');
+  }, [router, setStep]);
+
   // Result state: DNA teaser card (shareable, watermarked) — except the
-  // skip path, whose result is a local starter style, never server-scored
-  // DNA: distinct headline + no watermarked share card.
+  // skip path, whose result is a local starter style, never server-scored.
   if (result) {
     return (
       <View style={[styles.root, { backgroundColor: colors.background }]} testID="quiz-result">
@@ -139,7 +214,7 @@ export default function QuizScreen() {
         </Text>
         {!result.starter && (
           <ShareCard
-            teaser={result.teaser}
+            teaser={typeof result.teaser === 'string' ? result.teaser : ''}
             labels={result.labels}
             colorSeason={result.colorSeason}
             watermark
@@ -147,7 +222,7 @@ export default function QuizScreen() {
           />
         )}
         {result.starter && (
-          <Text style={[styles.back, { color: colors.muted }]} testID="quiz-starter-note">
+          <Text style={[styles.hint, { color: colors.muted }]} testID="quiz-starter-note">
             Not AI-scored yet — take the quiz or add clothes and your DNA refines itself.
           </Text>
         )}
@@ -155,41 +230,119 @@ export default function QuizScreen() {
           <Text style={[styles.buttonText, { color: colors.onPrimary }]}>Continue to your photo</Text>
         </Pressable>
         <Pressable onPress={clearResult} testID="quiz-result-back">
-          <Text style={[styles.back, { color: colors.muted }]}>Back to answers</Text>
+          <Text style={[styles.hint, { color: colors.muted }]}>Back to answers</Text>
         </Pressable>
       </View>
     );
   }
 
+  const isAbout = stepKey === 'about';
+
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]} testID="quiz-screen">
-      <Text style={[styles.progress, { color: colors.muted }]} testID="quiz-progress">
-        Step {stepIndex + 1} of {QUIZ_STEPS.length}
-      </Text>
-      <Text style={[styles.title, { color: colors.text }]}>{STEP_LABEL[stepKey].title}</Text>
-      <Text style={[styles.hint, { color: colors.muted }]}>{STEP_LABEL[stepKey].hint}</Text>
+      <View style={styles.header}>
+        <Text style={[styles.kicker, { color: colors.primary }]}>{label.kicker}</Text>
+        <Text style={[styles.progress, { color: colors.muted }]} testID="quiz-progress">
+          Step {stepIndex + 1} of {QUIZ_STEPS.length}
+        </Text>
+      </View>
+      <Text style={[styles.title, { color: colors.text }]}>{label.title}</Text>
+      <Text style={[styles.hint, { color: colors.muted }]}>{label.hint}</Text>
 
-      {submitting ? (
-        <View style={styles.state} testID="quiz-loading">
-          <ActivityIndicator size="large" />
-          <Text style={[styles.hint, { color: colors.muted }]}>Reading your style DNA…</Text>
-        </View>
+      {isAbout ? (
+        <ScrollView style={styles.aboutScroll} contentContainerStyle={styles.aboutContent} showsVerticalScrollIndicator={false}>
+          <Text style={[styles.aboutLabel, { color: colors.text }]}>Where do you live?</Text>
+          <View style={styles.chipCloud}>
+            {COUNTRIES.map((c) => (
+              <Pressable
+                key={c}
+                onPress={() => {
+                  setAnswer('country', c as never);
+                  setError(null);
+                }}
+                style={[
+                  styles.chip,
+                  { backgroundColor: answers.country === c ? colors.primary : colors.surface, borderColor: colors.border },
+                ]}
+                testID={`quiz-country-${c.replace(/\W+/g, '-').toLowerCase()}`}
+              >
+                <Text
+                  style={[styles.chipText, { color: answers.country === c ? colors.onPrimary : colors.text }]}
+                  numberOfLines={1}
+                >
+                  {c}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+
+          <Text style={[styles.aboutLabel, { color: colors.text }]}>What do you do?</Text>
+          <View style={styles.chipCloud}>
+            {OCCUPATIONS.map((o) => (
+              <Pressable
+                key={o}
+                onPress={() => {
+                  setAnswer('occupation', o as never);
+                  setError(null);
+                }}
+                style={[
+                  styles.chip,
+                  { backgroundColor: answers.occupation === o ? colors.primary : colors.surface, borderColor: colors.border },
+                ]}
+                testID={`quiz-occupation-${o.replace(/\W+/g, '-').toLowerCase()}`}
+              >
+                <Text
+                  style={[styles.chipText, { color: answers.occupation === o ? colors.onPrimary : colors.text }]}
+                  numberOfLines={1}
+                >
+                  {o}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+
+          <Text style={[styles.aboutLabel, { color: colors.text }]}>What do you love? (up to {LIKES_MAX})</Text>
+          <View style={styles.chipCloud}>
+            {LIKES.map((l) => (
+              <Pressable
+                key={l}
+                onPress={() => toggleLike(l)}
+                style={[
+                  styles.chip,
+                  { backgroundColor: likes.includes(l) ? colors.primary : colors.surface, borderColor: colors.border },
+                ]}
+                testID={`quiz-like-${l.replace(/\W+/g, '-').toLowerCase()}`}
+              >
+                <Text style={[styles.chipText, { color: likes.includes(l) ? colors.onPrimary : colors.text }]} numberOfLines={1}>
+                  {l}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </ScrollView>
       ) : (
         <View style={styles.choices}>
           {choices.map((c) => {
-            const active = isMulti ? picks.includes(c) : String(selected ?? '') === c;
+            const current = stepKey === 'gender' ? answers.gender : answers[storeKeyFor(stepKey)];
+            const chosen = isMulti
+              ? picks.includes(c)
+              : typeof current === 'number'
+                ? Number(c) === current
+                : current === c;
             return (
               <Pressable
                 key={c}
                 onPress={() => choose(c)}
                 style={[
                   styles.choice,
-                  { borderColor: colors.border, borderWidth: 1 },
-                  active && { backgroundColor: colors.primary },
+                  { backgroundColor: chosen ? colors.primary : colors.surface, borderColor: chosen ? colors.primary : colors.border },
                 ]}
                 testID={`quiz-choice-${c}`}
               >
-                <Text style={[styles.choiceText, { color: active ? colors.onPrimary : colors.text }]}>
+                <Text
+                  style={[styles.choiceText, { color: chosen ? colors.onPrimary : colors.text }]}
+                  numberOfLines={1}
+                >
                   {c}
                 </Text>
               </Pressable>
@@ -205,43 +358,38 @@ export default function QuizScreen() {
       )}
 
       <View style={styles.footer}>
-        {stepIndex > 0 && (
-          <Pressable onPress={back} testID="quiz-back">
-            <Text style={[styles.back, { color: colors.muted }]}>Back</Text>
-          </Pressable>
-        )}
-        {!result && (
+        <Pressable
+          style={[
+            styles.button,
+            { backgroundColor: canContinue ? colors.primary : colors.border },
+          ]}
+          onPress={() => {
+            if (!canContinue || submitting) return;
+            setError(null);
+            if (isLast) void submit();
+            else next();
+          }}
+          disabled={!canContinue || submitting}
+          testID={isLast ? 'quiz-submit' : canContinue && isMulti ? 'quiz-multi-continue' : 'quiz-continue'}
+        >
+          {submitting ? (
+            <ActivityIndicator color={colors.onPrimary} />
+          ) : (
+            <Text style={[styles.buttonText, { color: canContinue ? colors.onPrimary : colors.muted }]}>
+              {isLast ? 'See my style DNA' : isMulti && picks.length > 0 ? `Continue (${picks.length} picked)` : 'Continue'}
+            </Text>
+          )}
+        </Pressable>
+        <View style={styles.footerRow}>
+          {stepIndex > 0 ? (
+            <Pressable onPress={back} testID="quiz-back">
+              <Text style={[styles.hint, { color: colors.muted }]}>Back</Text>
+            </Pressable>
+          ) : null}
           <Pressable onPress={skipQuiz} testID="quiz-skip">
-            <Text style={[styles.back, { color: colors.muted }]}>
-              Skip and use a starter style
-            </Text>
+            <Text style={[styles.hint, { color: colors.muted }]}>Skip and use a starter style</Text>
           </Pressable>
-        )}
-        {isMulti && !isLast && (
-          <Pressable
-            style={[
-              styles.button,
-              { backgroundColor: colors.primary, opacity: picks.length > 0 ? 1 : 0.5 },
-            ]}
-            onPress={next}
-            disabled={picks.length === 0}
-            testID="quiz-multi-continue"
-          >
-            <Text style={[styles.buttonText, { color: colors.onPrimary }]}>
-              Continue{picks.length > 0 ? ` (${picks.length} picked)` : ''}
-            </Text>
-          </Pressable>
-        )}
-        {isLast && (
-          <Pressable
-            style={[styles.button, { backgroundColor: colors.primary }]}
-            onPress={() => void submit()}
-            disabled={submitting}
-            testID="quiz-submit"
-          >
-            <Text style={[styles.buttonText, { color: colors.onPrimary }]}>See my style DNA</Text>
-          </Pressable>
-        )}
+        </View>
       </View>
     </View>
   );
@@ -249,16 +397,23 @@ export default function QuizScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, padding: 24, paddingTop: 64 },
-  progress: { fontSize: 13, fontWeight: '600' },
-  title: { fontSize: 30, fontWeight: '800', fontFamily: 'Georgia', marginTop: 8 },
-  hint: { fontSize: 14, marginTop: 4 },
-  choices: { gap: 10, marginTop: 24 },
-  choice: { borderRadius: 12, paddingVertical: 14, paddingHorizontal: 16 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  kicker: { fontSize: 13, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 1 },
+  progress: { fontSize: 12, fontWeight: '600' },
+  title: { fontSize: 30, fontWeight: '800', fontFamily: 'Georgia', marginTop: 10 },
+  hint: { fontSize: 13, marginTop: 4, lineHeight: 18 },
+  choices: { marginTop: 24, gap: 10 },
+  choice: { borderRadius: 16, borderWidth: 1, paddingVertical: 16, paddingHorizontal: 18 },
   choiceText: { fontSize: 16, fontWeight: '600' },
-  footer: { marginTop: 24, gap: 12 },
-  button: { borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
+  aboutScroll: { marginTop: 16, flex: 1 },
+  aboutContent: { paddingBottom: 16 },
+  aboutLabel: { fontSize: 15, fontWeight: '700', marginTop: 14, marginBottom: 8 },
+  chipCloud: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: { borderRadius: 999, borderWidth: 1, paddingVertical: 9, paddingHorizontal: 14 },
+  chipText: { fontSize: 13, fontWeight: '600' },
+  error: { fontSize: 13, marginTop: 10 },
+  footer: { marginTop: 'auto', paddingBottom: 8 },
+  footerRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 14 },
+  button: { borderRadius: 999, paddingVertical: 17, alignItems: 'center' },
   buttonText: { fontSize: 16, fontWeight: '700' },
-  back: { fontSize: 15, textAlign: 'center' },
-  error: { fontSize: 13, marginTop: 12 },
-  state: { alignItems: 'center', paddingVertical: 48, gap: 8 },
 });

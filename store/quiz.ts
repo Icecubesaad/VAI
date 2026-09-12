@@ -3,7 +3,9 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import type { QuizAnswers, QuizResult } from '@/lib/api';
 import { mmkvStorage } from './mmkv';
 
-export const QUIZ_STEPS = ['style', 'palette', 'dressCode', 'boldness', 'budget'] as const;
+export const QUIZ_STEPS = [
+  'gender', 'style', 'palette', 'dressCode', 'boldness', 'budget', 'about',
+] as const;
 export type QuizStepKey = (typeof QUIZ_STEPS)[number];
 
 /** `starter: true` marks the local skip path — NOT server-scored DNA. */
@@ -50,7 +52,7 @@ export const useQuiz = create<QuizState>()(
         set({
           stepIndex: 0,
           answers: {
-            everydayStyle: 'Minimal',
+            everydayStyle: 'Minimal, Casual',
             palette: 'Neutrals',
             dressCode: 'Casual',
             boldness: 3,

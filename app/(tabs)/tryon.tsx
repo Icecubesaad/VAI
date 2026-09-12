@@ -494,194 +494,239 @@ export default function TryOnScreen() {
 
   const busy = phase === 'starting' || phase === 'rendering';
 
-  return (
-    <View style={[styles.root, { backgroundColor: colors.background }]} testID="tryon-screen">
-      <View style={styles.header}>
-        <Text style={[styles.title, { color: colors.text }]}>Try on</Text>
-        <QuotaBadge left={rendersLeft} cap={cap} onPress={() => router.push('/onboarding/paywall')} />
-      </View>
+  // Full-screen studio (CONTRACT uiux pass): the look IS the screen. Latest
+  // render fills the background (base photo before the first render), glass
+  // chrome floats over it, and the bottom combo scroller picks garments.
+  const bgUri = job && job.status === 'done' ? job.outputUrl ?? basePhotoUrl : basePhotoUrl;
 
-      {/* Base photo */}
-      <View style={styles.baseRow}>
-        {basePhotoUrl ? (
-          <Image source={{ uri: basePhotoUrl }} style={styles.baseThumb} contentFit="cover" />
-        ) : (
-          <View style={[styles.baseThumb, styles.baseEmpty, { borderColor: colors.border }]}>
-            <Text style={[styles.baseEmptyText, { color: colors.muted }]}>No photo</Text>
-          </View>
-        )}
-        <View style={styles.baseMeta}>
-          <Text style={[styles.baseTitle, { color: colors.text }]}>Base photo</Text>
-          <Pressable onPress={() => router.push('/onboarding/selfie-capture')} testID="tryon-retake">
-            <Text style={[styles.link, { color: colors.primary }]}>
-              {basePhotoUrl ? 'Retake' : 'Take a mirror selfie'}
+  return (
+    <View style={[styles.root, { backgroundColor: '#0E0C0A' }]} testID="tryon-screen">
+      {/* full-bleed background */}
+      {bgUri ? (
+        <Image
+          source={{ uri: bgUri }}
+          style={StyleSheet.absoluteFill}
+          contentFit="cover"
+          transition={250}
+          accessibilityLabel={job && job.status === 'done' ? 'Your try-on result' : 'Your base photo'}
+        />
+      ) : (
+        <View style={StyleSheet.absoluteFill} testID="tryon-empty-bg">
+          <View style={styles.emptyStage}>
+            <Text style={styles.emptyStageTitle}>Your studio</Text>
+            <Text style={styles.emptyStageBody}>
+              {garments.length === 0
+                ? 'Add garments to your closet, take a mirror selfie, and see every look on you.'
+                : 'Take a mirror selfie to see your closet on you.'}
             </Text>
-          </Pressable>
-        </View>
-        <View style={styles.modes}>
-          {(['tryon', 'restyle', 'compare'] as RenderMode[]).map((m) => (
             <PressScale
-              key={m}
-              scaleTo={0.98}
-              onPress={() => {
-                void hapticFor.select();
-                setMode(m);
-              }}
-              style={[
-                styles.mode,
-                { borderColor: colors.border },
-                mode === m && { backgroundColor: colors.primary },
-              ]}
-              testID={`mode-${m}`}
+              style={styles.emptyStageBtn}
+              onPress={() => router.push(garments.length === 0 ? '/(tabs)/closet' : '/onboarding/selfie-capture')}
+              testID="tryon-empty-cta"
             >
-              <Text style={[styles.modeText, { color: mode === m ? colors.onPrimary : colors.text }]}>
-                {m === 'tryon' ? 'Try-on' : m === 'restyle' ? 'Restyle' : 'Compare'}
+              <Text style={styles.emptyStageBtnText}>
+                {garments.length === 0 ? 'Open your closet' : 'Take a mirror selfie'}
               </Text>
             </PressScale>
-          ))}
+          </View>
         </View>
+      )}
+
+      {/* legibility scrims */}
+      <View pointerEvents="none" style={styles.scrimTop} aria-hidden />
+      <View pointerEvents="none" style={styles.scrimBottom} aria-hidden />
+
+      {/* floating chrome */}
+      <View style={styles.chromeTop}>
+        <PressScale
+          style={styles.glassBtn}
+          onPress={() => router.push('/onboarding/selfie-capture')}
+          testID="tryon-retake"
+          accessibilityRole="button"
+          accessibilityLabel="Retake your base photo"
+        >
+          <Text style={styles.glassBtnText}>◉</Text>
+        </PressScale>
+        <View style={{ flex: 1 }} />
+        {job && job.status === 'done' ? (
+          <PressScale
+            style={styles.glassBtn}
+            onPress={() => {
+              setShareError(null);
+              setSharedUrl(null);
+              setShareBoardId(null);
+              if (!tasteConnected) router.push('/pinterest-connect');
+              else setShareOpen(true);
+            }}
+            testID="share-pinterest"
+            accessibilityRole="button"
+            accessibilityLabel="Save this look to Pinterest"
+          >
+            <Text style={styles.glassBtnText}>P</Text>
+          </PressScale>
+        ) : null}
+        <PressScale
+          style={styles.glassQuota}
+          onPress={() => router.push('/onboarding/paywall')}
+          testID="tryon-quota"
+          accessibilityRole="button"
+          accessibilityLabel={rendersLeft + ' of ' + cap + ' renders left. Upgrade for more.'}
+        >
+          <Text style={styles.glassQuotaText}>{rendersLeft + ' of ' + cap}</Text>
+        </PressScale>
       </View>
 
-      {/* Restyle change-note (server requires a non-empty note; the P1-4
-          guard above blocks Generate until this + a finished render exist). */}
-      {mode === 'restyle' && (
-        <TextInput
-          value={restyleNote}
-          onChangeText={setRestyleNote}
-          placeholder="Describe the change (e.g. tuck it in, warmer light)"
-          maxLength={280}
-          style={[styles.note, { borderColor: colors.border, color: colors.text }]}
-          testID="restyle-note"
-        />
-      )}
-
-      {/* Outfit selector */}
-      {garments.length === 0 ? (
-        <View style={styles.state} testID="tryon-empty">
-          <Text style={[styles.stateTitle, { color: colors.text }]}>Nothing to try on yet</Text>
-          <Text style={[styles.stateText, { color: colors.muted }]}>
-            Add garments to your closet first, then come back to see them on you.
-          </Text>
-          <Pressable
-            style={[styles.button, { backgroundColor: colors.primary }]}
-            onPress={() => router.push('/(tabs)/closet')}
-          >
-            <Text style={[styles.buttonText, { color: colors.onPrimary }]}>Add to your closet</Text>
-          </Pressable>
-        </View>
-      ) : (
-        <FlatList
-          data={garments}
-          horizontal
-          keyExtractor={(g) => g.id}
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.selector}
-          renderItem={({ item }) => {
-            const active = selected.includes(item.id);
-            return (
-              <PressScale
-                scaleTo={0.95}
-                onPress={() => toggleSelect(item.id)}
-                testID={`select-${item.id}`}
-              >
-                <Image
-                  source={{ uri: item.cutoutUrl ?? item.imageUrl }}
-                  style={[styles.pick, active && { borderColor: colors.primary, borderWidth: 3 }]}
-                  contentFit="cover"
-                />
-              </PressScale>
-            );
-          }}
-        />
-      )}
-
-      <PressScale
-        style={[
-          styles.button,
-          { backgroundColor: canGenerate ? colors.primary : colors.border },
-          styles.generate,
-        ]}
-        onPress={() => {
-          void hapticFor.confirm();
-          void handleGenerate();
-        }}
-        disabled={!canGenerate}
-        testID="tryon-generate"
-      >
-        {phase === 'starting' ? (
-          <ActivityIndicator color={colors.onPrimary} />
-        ) : (
-          <Text style={[styles.buttonText, { color: colors.onPrimary }]}>
-            {tier === 'free' && rendersLeft <= 0
-              ? 'Get more renders'
-              : mode === 'restyle'
-                ? 'Restyle this look'
-                : 'See it on me'}
-          </Text>
-        )}
-      </PressScale>
+      {/* error + retry (over the photo) */}
       {!!error && (
-        <View style={[styles.errorBox, { backgroundColor: colors.surface, borderColor: colors.border }]} testID="tryon-error">
-          <Text style={[styles.error, { color: colors.danger }]}>{error}</Text>
+        <View style={styles.errorGlass} testID="tryon-error">
+          <Text style={styles.errorGlassText} numberOfLines={3}>
+            {error}
+          </Text>
+          {phase === 'failed' && !busy ? (
+            <PressScale
+              style={styles.retryPill}
+              onPress={() => {
+                void hapticFor.select();
+                void handleGenerate();
+              }}
+              testID="tryon-retry"
+            >
+              <Text style={styles.retryPillText}>Retry (free)</Text>
+            </PressScale>
+          ) : null}
         </View>
       )}
 
-      {/* Result / 2-up compare — the staged progress box shares the result's
-          4:5 geometry, so progress → result crossfades in place (cheap
-          shared-element continuity). RenderView's own compact loading slot
-          stays for its other parents; this screen owns the staged copy. */}
-      {busy && (
-        <RenderProgress
-          testID="tryon-loading"
-          // Pips follow the SERVER state (submitted → queued → processing) —
-          // the timer-cycled meter contradicted the "never a fake countdown"
-          // iron law the header itself cites.
-          index={phase === 'starting' ? 0 : job?.status === 'queued' ? 1 : 2}
-        />
-      )}
-      <ResultReveal revealKey={job && job.status === 'done' ? job.id : null}>
-        {!!job && job.status === 'done' && (
-          <RenderView
-            basePhotoUrl={basePhotoUrl}
-            outputUrl={job.outputUrl ?? null}
-            status={job.status}
-            compare={mode === 'compare'}
-            watermark
+      {/* render progress: honest server-state copy, centered over the photo */}
+      {busy ? (
+        <View style={styles.progressGlass} testID="tryon-loading">
+          <ActivityIndicator color="#FFFFFF" />
+          <Text style={styles.progressText}>
+            {phase === 'starting'
+              ? 'Sending to the studio…'
+              : job && job.status === 'queued'
+                ? 'In the queue…'
+                : 'Rendering your look…'}
+          </Text>
+        </View>
+      ) : null}
+
+      {/* bottom dock: combo scroller + pills */}
+      <View pointerEvents="box-none" style={styles.dock}>
+        {mode === 'restyle' ? (
+          <TextInput
+            value={restyleNote}
+            onChangeText={setRestyleNote}
+            placeholder="Describe the change (e.g. tuck it in, warmer light)"
+            placeholderTextColor="rgba(255,255,255,0.55)"
+            maxLength={280}
+            style={styles.noteGlass}
+            testID="restyle-note"
+          />
+        ) : null}
+        {garments.length === 0 ? (
+          <Text style={styles.dockHint} testID="tryon-empty">
+            Add garments to your closet to build combos.
+          </Text>
+        ) : (
+          <FlatList
+            data={garments}
+            horizontal
+            keyExtractor={(g) => g.id}
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.selector}
+            renderItem={({ item }) => {
+              const active = selected.includes(item.id);
+              return (
+                <PressScale
+                  scaleTo={0.95}
+                  onPress={() => toggleSelect(item.id)}
+                  testID={'select-' + item.id}
+                  accessibilityRole="button"
+                  accessibilityLabel={(active ? 'Remove ' : 'Add ') + item.category + (active ? ' from' : ' to') + ' this look'}
+                  accessibilityState={{ selected: active }}
+                >
+                  <View style={[styles.pickWrap, active && styles.pickWrapActive]}>
+                    <Image
+                      source={{ uri: item.cutoutUrl ?? item.imageUrl }}
+                      style={styles.pick}
+                      contentFit="cover"
+                    />
+                  </View>
+                </PressScale>
+              );
+            }}
           />
         )}
-      </ResultReveal>
-      {!!job && job.status === 'done' && styledWithTaste && (
-        <Text style={[styles.tasteCaption, { color: colors.muted }]} testID="taste-caption">
-          Styled with your inspiration
-        </Text>
-      )}
-      {!!job && job.status === 'done' && (
-        <Pressable
-          style={[styles.button, styles.shareBtn, { borderColor: colors.border, borderWidth: 1 }]}
-          onPress={() => {
-            setShareError(null);
-            setSharedUrl(null);
-            setShareBoardId(null);
-            if (!tasteConnected) router.push('/pinterest-connect');
-            else setShareOpen(true);
-          }}
-          testID="share-pinterest"
-        >
-          <Text style={[styles.buttonText, { color: colors.text }]}>Save to Pinterest</Text>
-        </Pressable>
-      )}
-      {phase === 'failed' && !busy && (
-        <PressScale
-          style={[styles.button, { borderColor: colors.border, borderWidth: 1 }]}
-          onPress={() => {
-            void hapticFor.select();
-            void handleGenerate();
-          }}
-          testID="tryon-retry"
-        >
-          <Text style={[styles.buttonText, { color: colors.text }]}>Retry (free)</Text>
-        </PressScale>
-      )}
+        <View style={styles.pillRow}>
+          <PressScale
+            style={styles.surprisePill}
+            onPress={() => {
+              void hapticFor.select();
+              // Real combo pick from the real closet: dress or top+bottom,
+              // plus layer + shoes when owned — never random noise.
+              const pick = (cat: string) => garments.find((g) => g.category === cat && !selected.includes(g.id));
+              const next = new Set(selected);
+              next.clear();
+              const dress = pick('dress') ?? pick('onepiece');
+              if (dress) next.add(dress.id);
+              else {
+                const top = pick('top');
+                const bottom = pick('bottom');
+                if (top) next.add(top.id);
+                if (bottom) next.add(bottom.id);
+              }
+              const layer = pick('outerwear');
+              if (layer) next.add(layer.id);
+              const shoes = pick('shoes');
+              if (shoes) next.add(shoes.id);
+              if (next.size === 0 && garments.length > 0) next.add(garments[0]!.id);
+              setSelected([...next]);
+            }}
+            testID="tryon-surprise"
+            accessibilityRole="button"
+            accessibilityLabel="Pick a combo for me from my closet"
+          >
+            <Text style={styles.surpriseText}>✦ Surprise me</Text>
+          </PressScale>
+          <PressScale
+            style={[styles.generatePill, { opacity: canGenerate || (tier === 'free' && rendersLeft <= 0) ? 1 : 0.55 }]}
+            onPress={() => {
+              void hapticFor.confirm();
+              void handleGenerate();
+            }}
+            disabled={!canGenerate && !(tier === 'free' && rendersLeft <= 0)}
+            testID="tryon-generate"
+            accessibilityRole="button"
+            accessibilityLabel={
+              tier === 'free' && rendersLeft <= 0
+                ? 'Get more renders'
+                : mode === 'restyle'
+                  ? 'Restyle this look'
+                  : 'Render this look on your photo'
+            }
+          >
+            {phase === 'starting' || phase === 'rendering' ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.generateText}>
+                {tier === 'free' && rendersLeft <= 0
+                  ? 'Get more renders'
+                  : mode === 'restyle'
+                    ? 'Restyle'
+                    : mode === 'compare'
+                      ? 'Compare'
+                      : 'See it on me'}
+              </Text>
+            )}
+          </PressScale>
+        </View>
+        {job && job.status === 'done' && styledWithTaste ? (
+          <Text style={styles.tasteCaptionDark} testID="taste-caption">
+            Styled with your inspiration
+          </Text>
+        ) : null}
+      </View>
 
       {/* Share-back: board picker → explicit confirm → pinterest-share. */}
       <Modal visible={shareOpen} transparent animationType="slide" onRequestClose={() => setShareOpen(false)}>
@@ -802,6 +847,38 @@ function todayKey(): string {
 }
 
 const styles = StyleSheet.create({
+  emptyStage: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 10 },
+  emptyStageTitle: { color: '#FFFFFF', fontSize: 26, fontWeight: '800', fontFamily: 'Georgia' },
+  emptyStageBody: { color: 'rgba(255,255,255,0.72)', fontSize: 14, textAlign: 'center', lineHeight: 20 },
+  emptyStageBtn: { marginTop: 10, borderRadius: 999, backgroundColor: '#FFFFFF', paddingVertical: 12, paddingHorizontal: 24 },
+  emptyStageBtnText: { color: '#1A1A1A', fontSize: 14, fontWeight: '700' },
+  scrimTop: { position: 'absolute', top: 0, left: 0, right: 0, height: 130, backgroundColor: 'rgba(10,10,10,0.42)' },
+  scrimBottom: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 300, backgroundColor: 'rgba(10,10,10,0.58)' },
+  chromeTop: { position: 'absolute', top: 54, left: 16, right: 16, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  glassBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
+  glassBtnText: { color: '#FFFFFF', fontSize: 17, fontWeight: '700' },
+  glassQuota: { borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.18)', paddingVertical: 10, paddingHorizontal: 14 },
+  glassQuotaText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
+  errorGlass: { position: 'absolute', top: 116, left: 24, right: 24, borderRadius: 16, backgroundColor: 'rgba(20,16,14,0.82)', padding: 14, gap: 8 },
+  errorGlassText: { color: '#FFFFFF', fontSize: 13, lineHeight: 18 },
+  retryPill: { alignSelf: 'flex-start', borderRadius: 999, backgroundColor: '#FFFFFF', paddingVertical: 8, paddingHorizontal: 16 },
+  retryPillText: { color: '#1A1A1A', fontSize: 13, fontWeight: '700' },
+  progressGlass: { position: 'absolute', top: '46%', left: 0, right: 0, alignItems: 'center', gap: 10 },
+  progressText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+  dock: { position: 'absolute', bottom: 0, left: 0, right: 0, paddingBottom: 22, gap: 12 },
+  dockHint: { color: 'rgba(255,255,255,0.85)', fontSize: 14, textAlign: 'center', padding: 20 },
+  noteGlass: { marginHorizontal: 16, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.16)', color: '#FFFFFF', paddingHorizontal: 14, paddingVertical: 10, fontSize: 14 },
+  selector: { paddingHorizontal: 16, gap: 10 },
+  pickWrap: { borderRadius: 14, borderWidth: 2, borderColor: 'rgba(255,255,255,0.35)', overflow: 'hidden' },
+  pickWrapActive: { borderColor: '#FFFFFF' },
+  pick: { width: 74, height: 92 },
+  pillRow: { flexDirection: 'row', paddingHorizontal: 16, gap: 10, alignItems: 'center' },
+  surprisePill: { borderRadius: 999, backgroundColor: 'rgba(167,139,250,0.92)', paddingVertical: 14, paddingHorizontal: 18 },
+  surpriseText: { color: '#FFFFFF', fontSize: 14, fontWeight: '800' },
+  generatePill: { flex: 1, borderRadius: 999, backgroundColor: '#A78BFA', paddingVertical: 14, alignItems: 'center' },
+  generateText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800' },
+  tasteCaptionDark: { color: 'rgba(255,255,255,0.65)', fontSize: 12, textAlign: 'center' },
+
   root: { flex: 1, padding: 16 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   title: { fontSize: 28, fontWeight: '700', fontFamily: 'Georgia' },
@@ -815,9 +892,6 @@ const styles = StyleSheet.create({
   modes: { flex: 1, flexDirection: 'row', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' },
   mode: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
   modeText: { fontSize: 12, fontWeight: '600' },
-  note: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, marginTop: 12, fontSize: 14 },
-  selector: { gap: 10, paddingVertical: 16 },
-  pick: { width: 84, height: 84, borderRadius: 12, backgroundColor: '#EDE8E0' },
   button: { borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
   buttonText: { fontSize: 15, fontWeight: '600' },
   generate: { marginTop: 4 },

@@ -87,6 +87,14 @@ export interface QuizAnswers {
   dressCode: string;
   boldness: number; // 1-5
   budgetBand: string;
+  /** Style catalog side: Menswear | Womenswear (drives the persona list). */
+  gender?: string;
+  /** Where they live — personalizes seasons, fabric weight, shop picks. */
+  country?: string;
+  /** Student / professional / … — shapes the default dress code. */
+  occupation?: string;
+  /** Comma-joined likes (gym, travel, nights-out…) — prompt personalization. */
+  interests?: string;
 }
 
 export interface QuizResult {
@@ -754,6 +762,12 @@ export const api = {
         dress_code: a.dressCode,
         boldness: a.boldness,
         budget_band: a.budgetBand,
+        // Extended profile — the server stores these in fit_prefs and feeds
+        // them to the stylist prompt.
+        ...(a.gender ? { gender: a.gender } : {}),
+        ...(a.country ? { country: a.country } : {}),
+        ...(a.occupation ? { occupation: a.occupation } : {}),
+        ...(a.interests ? { interests: a.interests } : {}),
       },
     };
     if (body.selfieUrl) req['selfie_url'] = body.selfieUrl;
@@ -873,6 +887,33 @@ export const api = {
       render_id: renderId,
     });
     return mapRenderJob(raw);
+  },
+
+  /**
+   * Latest DONE render per outfit (signed URL) — Today hero + week strip.
+   * Returns {} when nothing is rendered yet.
+   */
+  getOutfitRenders: async (outfitIds: string[]): Promise<Record<string, { renderId: string; outputUrl: string; createdAt: string }>> => {
+    const raw = await invoke<Record<string, unknown>, unknown>(FN.renderTryon, {
+      action: 'outfit-status',
+      outfit_ids: outfitIds.slice(0, 10),
+    });
+    const r = isRecord(raw) ? raw : {};
+    const renders = isRecord(r['renders']) ? (r['renders'] as Record<string, unknown>) : {};
+    const out: Record<string, { renderId: string; outputUrl: string; createdAt: string }> = {};
+    for (const [outfitId, v] of Object.entries(renders)) {
+      const rec = isRecord(v) ? v : {};
+      const renderId = pickStr(rec['render_id'], rec['renderId']);
+      const outputUrl = pickStr(rec['output_url'], rec['outputUrl']);
+      if (renderId && outputUrl) {
+        out[outfitId] = {
+          renderId,
+          outputUrl,
+          createdAt: pickStr(rec['created_at'], rec['createdAt']) ?? '',
+        };
+      }
+    }
+    return out;
   },
 
   /**

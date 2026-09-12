@@ -4,10 +4,8 @@ import { Image } from 'expo-image';
 import { hapticFor } from '../lib/haptics';
 import { PressScale } from './PressScale';
 import { useReducedMotion } from '../lib/motion';
-import { reelFullProps, reelThumbProps } from '../lib/perf';
+import { reelFullProps } from '../lib/perf';
 import { ReelSkeleton } from './ReelSkeleton';
-
-export type ReelPose = 'front' | 'step' | 'detail';
 
 /**
  * One pager cell in the looks reel. The pager parent owns sizing /
@@ -18,7 +16,7 @@ export type ReelCard = {
   outfitId: string;
   renderId: string;
   imageUrl: string;
-  pose: ReelPose;
+  pose: 'front' | 'step' | 'detail';
   garmentIds: string[];
   whyLine: string;
   trendTag?: string;
@@ -28,19 +26,20 @@ export type ReelCard = {
 
 export type ReelCardProps = {
   card: ReelCard;
-  onWear?: () => void;
   onTry?: () => void;
-  onShop?: () => void;
   onSave?: () => void;
   onRegenerate?: () => void;
   saved: boolean;
   /** Owned-garment thumbs keyed by garment id (matches `card.garmentIds`). */
   garmentThumbs?: Record<string, string>;
-  /** Renders-left pill in the top scrim; falls back to the cost context pill. */
-  quotaLeft?: number | null;
-  quotaCap?: number | null;
-  onUpgrade?: () => void;
-  /** Failed-render retry (free, same language as RenderView). Falls back to onRegenerate. */
+  /** Real piece names keyed by garment id (closet categories), for the title. */
+  garmentNames?: Record<string, string>;
+  /** Pager position — drives the dots on the visible card. */
+  index?: number;
+  count?: number;
+  /** Whether THIS card is the pager's visible page (dots render on it only). */
+  active?: boolean;
+  /** Failed-render retry (free). */
   error?: string | null;
   onRetry?: () => void;
   retrying?: boolean;
@@ -49,126 +48,26 @@ export type ReelCardProps = {
   testID?: string;
 };
 
-export const REEL_POSE_LABEL: Record<ReelPose, string> = {
-  front: 'Front fit',
-  step: 'Street step',
-  detail: 'Detail',
-};
-
 /** Mandatory microcopy on every reel cell (store compliance, pack §6/§9). */
 export const REEL_DISCLOSURE = 'AI styled · may differ from fit';
 
-function money(n: number): string {
-  return `$${n.toFixed(n < 10 ? 2 : 0)}`;
-}
-
-const GarmentChip = memo(function GarmentChip({
-  id,
-  index,
-  thumb,
-}: {
-  id: string;
-  index: number;
-  thumb?: string;
-}): React.JSX.Element {
-  const reduceMotion = useReducedMotion();
-  return (
-    <View
-      accessible
-      accessibilityRole="text"
-      accessibilityLabel={`Outfit piece ${index + 1}`}
-      className="flex-row items-center rounded-pill border border-line bg-card py-[3px] pl-[3px] pr-sm"
-      style={{ columnGap: 6 }}
-    >
-      <View className="h-[28px] w-[28px] overflow-hidden rounded-full bg-paperDeep">
-        {thumb ? (
-          <Image
-            source={{ uri: thumb }}
-            style={{ width: '100%', height: '100%' }}
-            {...reelThumbProps(id)}
-            transition={reduceMotion ? 0 : 150}
-            accessibilityLabel={`Piece ${index + 1} thumbnail`}
-          />
-        ) : (
-          <View className="h-full w-full items-center justify-center" aria-hidden>
-            <Text className="text-[13px] text-muted">✦</Text>
-          </View>
-        )}
-      </View>
-      <Text className="text-[12px] leading-[16px] font-semibold text-inkSoft">Piece {index + 1}</Text>
-    </View>
-  );
-});
-
-const ReelAction = memo(function ReelAction({
-  label,
-  glyph,
-  onPress,
-  active = false,
-  testID,
-  hint,
-}: {
-  label: string;
-  glyph: string;
-  onPress?: () => void;
-  active?: boolean;
-  testID?: string;
-  hint?: string;
-}): React.JSX.Element | null {
-  const press = useCallback(() => {
-    if (active) void hapticFor.done();
-    else void hapticFor.select();
-    onPress?.();
-  }, [active, onPress]);
-  if (!onPress) return null;
-  return (
-    <PressScale
-      testID={testID}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityHint={hint}
-      accessibilityState={{ selected: active }}
-      hitSlop={8}
-      onPress={press}
-      className={`flex-1 items-center rounded-lg border py-sm active:bg-paperDeep ${
-        active ? 'border-sage bg-sageWash' : 'border-line bg-card'
-      }`}
-      style={{ rowGap: 2 }}
-    >
-      <Text className={`text-[18px] leading-[22px] font-bold ${active ? 'text-terracotta' : 'text-ink'}`} aria-hidden>
-        {glyph}
-      </Text>
-      <Text className={`text-[11px] leading-[14px] font-semibold ${active ? 'text-sageDeep' : 'text-inkSoft'}`}>
-        {label}
-      </Text>
-    </PressScale>
-  );
-});
-
 /**
- * Full-screen reel card — expo-image cover, top scrim (pose chip + trend
- * chip + quota/cost context), bottom paper sheetlet (garment chips with
- * tiny thumbs, 1–2 line why-line, Wear-it-today primary + Try / Shop /
- * Save / Remix icon-buttons).
- *
- * Double-tap the photo = save + heart burst (single taps are no-ops so the
- * pager owns horizontal gestures). No `expo-linear-gradient` dependency —
- * the "gradient" is two layered scrims, so this ships with zero new native
- * deps. Action buttons render only when their handler is passed (same idiom
- * as OutfitCard: free tier hides Remix by not passing it).
+ * Full-screen reel card — the whole cell is the look. Floating glass buttons
+ * top-right (save ♥ + remix ↻), page dots + outfit title + why-line over a
+ * bottom scrim, one frosted "Try it on" pill. Double-tap the photo saves.
+ * Buttons render only when their handler is passed.
  */
 export const ReelCard = memo(function ReelCard({
   card,
-  onWear,
   onTry,
-  onShop,
   onSave,
   onRegenerate,
   saved,
   garmentThumbs,
-  quotaLeft = null,
-  quotaCap = null,
-  onUpgrade,
+  garmentNames,
+  index = 0,
+  count = 0,
+  active = false,
   error = null,
   onRetry,
   retrying = false,
@@ -182,8 +81,6 @@ export const ReelCard = memo(function ReelCard({
   const reduceMotion = useReducedMotion();
 
   const fireBurst = useCallback(() => {
-    // Reduced motion: the save still lands (heart state flips via `saved`);
-    // only the decorative burst is skipped — final state renders instantly.
     if (reduceMotion) return;
     setBurstOn(true);
     burstScale.setValue(0.4);
@@ -215,6 +112,12 @@ export const ReelCard = memo(function ReelCard({
     }
   }, [fireBurst, handleSave]);
 
+  const title = card.garmentIds
+    .map((id) => garmentNames?.[id])
+    .filter(Boolean)
+    .slice(0, 3)
+    .join(' · ');
+
   if (loading) {
     return <ReelSkeleton testID={testID} />;
   }
@@ -227,16 +130,16 @@ export const ReelCard = memo(function ReelCard({
         accessible
         accessibilityRole="alert"
         accessibilityLabel={`Look failed to load. ${error}`}
-        className="flex-1 items-center justify-center bg-paper px-xl"
+        className="flex-1 items-center justify-center bg-ink px-xl"
         style={{ rowGap: 8 }}
       >
-        <View className="h-[56px] w-[56px] items-center justify-center rounded-full bg-dangerWash" aria-hidden>
-          <Text className="text-[24px] text-danger">!</Text>
+        <View className="h-[56px] w-[56px] items-center justify-center rounded-full bg-white/10" aria-hidden>
+          <Text className="text-[24px] text-white">!</Text>
         </View>
-        <Text className="text-center font-display text-[22px] leading-[28px] font-semibold text-ink">
+        <Text className="text-center font-display text-[22px] leading-[28px] font-semibold text-white">
           Couldn&apos;t create this look
         </Text>
-        <Text className="text-center text-[15px] leading-[22px] text-inkSoft">{error}</Text>
+        <Text className="text-center text-[15px] leading-[22px] text-white/70">{error}</Text>
         {retry ? (
           <View className="mt-sm w-full">
             <PressScale
@@ -250,15 +153,15 @@ export const ReelCard = memo(function ReelCard({
                 void hapticFor.select();
                 retry();
               }}
-              className={`items-center justify-center rounded-lg bg-terracotta py-md active:bg-terracottaDeep ${
+              className={`items-center justify-center rounded-pill bg-white py-md active:opacity-80 ${
                 retrying ? 'opacity-50' : ''
               }`}
             >
               <View className="items-center justify-center">
-                <Text className={`text-[15px] font-bold text-white ${retrying ? 'opacity-0' : ''}`}>Retry (free)</Text>
+                <Text className={`text-[15px] font-bold text-ink ${retrying ? 'opacity-0' : ''}`}>Retry (free)</Text>
                 {retrying ? (
                   <View className="absolute inset-0 items-center justify-center">
-                    <ActivityIndicator size="small" color="#FFFFFF" />
+                    <ActivityIndicator size="small" color="#1A1A1A" />
                   </View>
                 ) : null}
               </View>
@@ -269,21 +172,14 @@ export const ReelCard = memo(function ReelCard({
     );
   }
 
-  const poseLabel = REEL_POSE_LABEL[card.pose];
-  const hasSecondary = Boolean(onTry ?? onShop ?? onSave ?? onRegenerate);
-  const visibleIds = card.garmentIds.slice(0, 4);
-  const overflow = card.garmentIds.length - visibleIds.length;
-  const qLeft = quotaLeft;
-  const qCap = quotaCap;
-
   return (
     <View
       testID={testID ?? 'reel-card'}
       accessible
-      accessibilityLabel={`AI styled look, ${poseLabel}. ${card.whyLine}`}
+      accessibilityLabel={`AI styled look. ${title}. ${card.whyLine}`}
       className="flex-1 bg-ink"
     >
-      {/* cover — double-tap saves */}
+      {/* cover — the whole cell is the look; double-tap saves */}
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Look photo"
@@ -291,63 +187,63 @@ export const ReelCard = memo(function ReelCard({
         onPress={handleImagePress}
         className="absolute inset-0"
       >
-        <Image
-          source={{ uri: card.imageUrl }}
-          style={{ width: '100%', height: '100%' }}
-          {...reelFullProps(card.id)}
-          transition={reduceMotion ? 0 : 200}
-          accessibilityLabel={`AI styled ${poseLabel} photo`}
-        />
-      </Pressable>
-
-      {/* top scrim — two layered fades stand in for a gradient (no new dep) */}
-      <View pointerEvents="none" className="absolute left-0 right-0 top-0 h-[148px]" style={{ backgroundColor: 'rgba(14, 11, 8, 0.42)' }} aria-hidden />
-      <View pointerEvents="none" className="absolute left-0 right-0 top-[148px] h-[44px]" style={{ backgroundColor: 'rgba(14, 11, 8, 0.12)' }} aria-hidden />
-
-      {/* top chips */}
-      <View className="absolute left-0 right-0 top-0 flex-row items-center px-md pb-sm pt-lg" style={{ columnGap: 6 }}>
-        <View accessible accessibilityRole="text" accessibilityLabel={`Pose: ${poseLabel}`} className="rounded-pill bg-white/95 px-sm py-[4px]">
-          <Text className="text-[12px] leading-[16px] font-bold text-ink">{poseLabel}</Text>
-        </View>
-        {card.trendTag ? (
-          <View accessible accessibilityRole="text" accessibilityLabel={`Trend: ${card.trendTag}`} className="rounded-pill bg-white/95 px-sm py-[4px]">
-            <Text className="text-[12px] leading-[16px] font-bold text-gold">✦ {card.trendTag}</Text>
-          </View>
-        ) : null}
-        <View className="flex-1" />
-        {qLeft != null && qCap != null ? (
-          onUpgrade ? (
-            <PressScale
-              testID="reel-quota"
-              accessibilityRole="button"
-              accessibilityLabel={`${qLeft} of ${qCap} renders left. See upgrade options.`}
-              accessibilityHint="Opens the Premium paywall"
-              hitSlop={12}
-              onPress={() => {
-                void hapticFor.select();
-                onUpgrade();
-              }}
-              className="rounded-pill bg-white/95 px-sm py-[4px] active:opacity-80"
-            >
-              <Text className="text-[12px] leading-[16px] font-bold text-ink">{`${qLeft} of ${qCap} left`}</Text>
-            </PressScale>
-          ) : (
-            <View accessible accessibilityRole="text" accessibilityLabel={`${qLeft} of ${qCap} renders left`} className="rounded-pill bg-white/95 px-sm py-[4px]">
-              <Text className="text-[12px] leading-[16px] font-bold text-ink">{`${qLeft} of ${qCap} left`}</Text>
-            </View>
-          )
+        {card.imageUrl ? (
+          <Image
+            source={{ uri: card.imageUrl }}
+            style={{ width: '100%', height: '100%' }}
+            {...reelFullProps(card.id)}
+            transition={reduceMotion ? 0 : 200}
+            accessibilityLabel="AI styled outfit photo"
+          />
         ) : (
-          <View
-            accessible
-            accessibilityRole="text"
-            accessibilityLabel={`${card.garmentIds.length} pieces, ${money(card.costUsd)}`}
-            className="rounded-pill bg-black/55 px-sm py-[4px]"
-          >
-            <Text className="text-[12px] leading-[16px] font-semibold text-white">
-              {money(card.costUsd)} · {card.garmentIds.length} pcs
-            </Text>
+          // Pending render: dark stage + honest note (never a fake image).
+          <View className="h-full w-full items-center justify-center bg-[#101010]">
+            <ActivityIndicator color="#FFFFFF" />
+            <Text className="mt-md text-[13px] font-semibold text-white/60">Styling this look…</Text>
           </View>
         )}
+      </Pressable>
+
+      {/* scrims for legibility (two layered fades — no new native dep) */}
+      <View pointerEvents="none" className="absolute left-0 right-0 top-0 h-[120px]" style={{ backgroundColor: 'rgba(10, 10, 10, 0.38)' }} aria-hidden />
+      <View pointerEvents="none" className="absolute bottom-0 left-0 right-0 h-[290px]" style={{ backgroundColor: 'rgba(10, 10, 10, 0.55)' }} aria-hidden />
+
+      {/* floating glass buttons — top-right */}
+      <View className="absolute right-md top-md items-center" style={{ rowGap: 10 }}>
+        {onSave ? (
+          <PressScale
+            testID="reel-save"
+            accessibilityRole="button"
+            accessibilityLabel={saved ? 'Remove from saved looks' : 'Save this look'}
+            accessibilityState={{ selected: saved }}
+            hitSlop={10}
+            onPress={() => {
+              if (!saved) void hapticFor.done();
+              else void hapticFor.select();
+              onSave();
+            }}
+            className="h-[46px] w-[46px] items-center justify-center rounded-full bg-white/20 active:opacity-70"
+          >
+            <Text className="text-[20px] leading-[24px] font-bold" style={{ color: saved ? '#FF5A6E' : '#FFFFFF' }}>
+              {saved ? '♥' : '♡'}
+            </Text>
+          </PressScale>
+        ) : null}
+        {onRegenerate ? (
+          <PressScale
+            testID="reel-regenerate"
+            accessibilityRole="button"
+            accessibilityLabel="Generate a new variation of this look"
+            hitSlop={10}
+            onPress={() => {
+              void hapticFor.select();
+              onRegenerate();
+            }}
+            className="h-[46px] w-[46px] items-center justify-center rounded-full bg-white/20 active:opacity-70"
+          >
+            <Text className="text-[18px] leading-[22px] text-white">↻</Text>
+          </PressScale>
+        ) : null}
       </View>
 
       {/* heart burst on double-tap save */}
@@ -359,65 +255,56 @@ export const ReelCard = memo(function ReelCard({
           className="absolute inset-0 items-center justify-center"
         >
           <View className="h-[96px] w-[96px] items-center justify-center rounded-full bg-white/95">
-            <Text className="text-[48px] leading-[52px] text-terracotta">♥</Text>
+            <Text className="text-[48px] leading-[52px] text-[#FF5A6E]">♥</Text>
           </View>
         </Animated.View>
       ) : null}
 
-      {/* bottom sheetlet */}
-      <View className="absolute bottom-0 left-0 right-0">
-        <View className="rounded-t-xl bg-paper px-lg pb-xl pt-sm">
-          <View className="mb-sm items-center" aria-hidden>
-            <View className="h-[4px] w-[40px] rounded-full bg-line" />
-          </View>
-          <View className="mb-sm flex-row flex-wrap" style={{ columnGap: 6, rowGap: 6 }}>
-            {visibleIds.map((id, i) => (
-              <GarmentChip key={id} id={id} index={i} thumb={garmentThumbs?.[id]} />
+      {/* bottom: dots → title → why-line → try pill */}
+      <View pointerEvents="box-none" className="absolute bottom-0 left-0 right-0 items-center px-lg pb-[86px]">
+        {active && count > 1 ? (
+          <View className="mb-md flex-row" style={{ columnGap: 5 }} aria-hidden>
+            {Array.from({ length: count }, (_, i) => (
+              <View
+                key={i}
+                className="h-[5px] w-[5px] rounded-full"
+                style={{ backgroundColor: i === index ? '#FFFFFF' : 'rgba(255,255,255,0.38)' }}
+              />
             ))}
-            {overflow > 0 ? (
-              <View accessible accessibilityLabel={`${overflow} more pieces`} className="rounded-pill bg-paperDeep px-sm py-[6px]">
-                <Text className="text-[12px] leading-[16px] font-bold text-inkSoft">+{overflow}</Text>
-              </View>
-            ) : null}
           </View>
-          <Text className="mb-[2px] text-[15px] leading-[22px] text-ink" numberOfLines={2}>
+        ) : null}
+        {!!title && (
+          <Text
+            testID="reel-outfit-title"
+            className="text-center font-display text-[26px] leading-[32px] font-bold text-white"
+            numberOfLines={1}
+          >
+            {title}
+          </Text>
+        )}
+        {!!card.whyLine && (
+          <Text className="mt-[6px] text-center text-[13px] leading-[18px] text-white/80" numberOfLines={2}>
             {card.whyLine}
           </Text>
-          <Text testID="reel-disclosure" className="mb-sm text-[12px] leading-[16px] text-muted">
-            {REEL_DISCLOSURE}
-          </Text>
-          {onWear ? (
-            <PressScale
-              testID="reel-wear"
-              accessibilityRole="button"
-              accessibilityLabel="Wear this outfit today"
-              accessibilityHint="Logs this look as today's outfit"
-              hitSlop={12}
-              onPress={() => {
-                void hapticFor.confirm();
-                onWear();
-              }}
-              className="mb-sm items-center rounded-lg bg-terracotta py-md active:bg-terracottaDeep"
-            >
-              <Text className="text-[16px] leading-[24px] font-bold text-white">Wear it today</Text>
-            </PressScale>
-          ) : null}
-          {hasSecondary ? (
-            <View className="flex-row" style={{ columnGap: 8 }}>
-              <ReelAction label="Try" glyph="✦" onPress={onTry} testID="reel-try" hint="Preview this look on your photo" />
-              <ReelAction label="Shop" glyph="◈" onPress={onShop} testID="reel-shop" hint="Shop similar pieces" />
-              <ReelAction
-                label={saved ? 'Saved' : 'Save'}
-                glyph="♥"
-                onPress={onSave ? handleSave : undefined}
-                active={saved}
-                testID="reel-save"
-                hint="Double-tap the photo also saves"
-              />
-              <ReelAction label="Remix" glyph="↻" onPress={onRegenerate} testID="reel-regenerate" hint="Generate a new variation" />
-            </View>
-          ) : null}
-        </View>
+        )}
+        <Text testID="reel-disclosure" className="mt-[6px] text-[11px] leading-[14px] text-white/50">
+          {REEL_DISCLOSURE}
+        </Text>
+        {onTry ? (
+          <PressScale
+            testID="reel-try"
+            accessibilityRole="button"
+            accessibilityLabel="Try this look on your photo"
+            hitSlop={10}
+            onPress={() => {
+              void hapticFor.confirm();
+              onTry();
+            }}
+            className="mt-md rounded-full bg-white px-xl py-[14px] active:opacity-80"
+          >
+            <Text className="text-[15px] font-bold text-ink">Try it on</Text>
+          </PressScale>
+        ) : null}
       </View>
     </View>
   );

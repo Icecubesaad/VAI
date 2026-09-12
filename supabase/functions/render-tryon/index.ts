@@ -344,6 +344,29 @@ Deno.serve(async (req) => {
       return json(await statusPayload(sb, row));
     }
 
+    // Batch read: latest DONE render per outfit (Today hero + week strip).
+    // POST { action: 'outfit-status', outfit_ids: [..] (max 10) }
+    // -> { renders: { [outfit_id]: { render_id, output_url, created_at } } }
+    if (body.action === "outfit-status") {
+      const rawIds = Array.isArray(body.outfit_ids) ? body.outfit_ids : [];
+      const ids = [...new Set(rawIds.filter((x): x is string => typeof x === "string" && x.length > 0))].slice(0, 10);
+      if (ids.length === 0) return json({ renders: {} });
+      const { data: rows } = await sb.from("renders").select(
+        "id,outfit_id,status,output_url,output_path,created_at",
+      ).eq("user_id", user.id).eq("status", "done").in("outfit_id", ids)
+        .order("created_at", { ascending: false });
+      const out: Record<string, { render_id: string; output_url: string; created_at: string }> = {};
+      for (const r of (rows ?? []) as Array<{
+        id: string; outfit_id: string | null; status: string;
+        output_url: string | null; output_path: string | null; created_at: string;
+      }>) {
+        if (!r.outfit_id || out[r.outfit_id]) continue; // first = newest
+        const url = r.output_path ? await signedRenderUrl(sb, user.id, r.output_path) : r.output_url;
+        if (url) out[r.outfit_id] = { render_id: r.id, output_url: url, created_at: r.created_at };
+      }
+      return json({ renders: out });
+    }
+
     const mode = str(body.mode) ?? "tryon";
 
     // Pose (0005): validated + resolved BEFORE any money moves. Fail closed.

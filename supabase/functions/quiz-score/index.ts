@@ -94,6 +94,19 @@ Deno.serve(async (req) => {
     }
 
     const sb = admin();
+    // Extended onboarding profile (style catalog gender, country, occupation,
+    // interests, personas) rides in the fit_prefs jsonb — the planner and
+    // shop-picks prompts read it for personalization.
+    const ap = answers as QuizAnswers & {
+      gender?: unknown; country?: unknown; occupation?: unknown; interests?: unknown;
+    };
+    const fitPrefs = {
+      ...((answers.fit_prefs ?? {}) as Record<string, unknown>),
+      ...(ap.gender !== undefined ? { gender: ap.gender } : {}),
+      ...(ap.country !== undefined ? { country: ap.country } : {}),
+      ...(ap.occupation !== undefined ? { occupation: ap.occupation } : {}),
+      ...(ap.interests !== undefined ? { interests: ap.interests } : {}),
+    };
     const { error: upErr } = await sb.from("style_profiles").upsert({
       user_id: user.id,
       everyday_style: answers.everyday_style,
@@ -102,7 +115,7 @@ Deno.serve(async (req) => {
       boldness: Math.round(Number(answers.boldness)),
       budget_band: answers.budget_band,
       body_shape: answers.body_shape ?? null,
-      fit_prefs: answers.fit_prefs ?? {},
+      fit_prefs: fitPrefs,
       undertone: answers.undertone ?? null,
       color_season: colorSeason,
       style_dna: styleDna,

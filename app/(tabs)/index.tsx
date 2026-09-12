@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState , useMemo } from 'react';
 import {
   Pressable,
   RefreshControl,
@@ -21,7 +21,6 @@ import { usePaywall } from '@/store/paywall';
 import { useTaste } from '@/store/taste';
 import { useQuotas } from '@/store/quotas';
 import { useCloset, selectClosetList } from '@/store/closet';
-import { fetchPoseStatus, missingPoses, useReel } from '@/store/reel';
 
 /** `store/paywall` Tier ('free'|'trial'|'premium') → analytics SubTier ('free'|'premium'). */
 function toAnalyticsTier(tier: string): 'free' | 'premium' {
@@ -59,28 +58,49 @@ export default function PlannerHome() {  const router = useRouter();
   const tasteConnected = useTaste((s) => s.connected);
   const tasteBoards = useTaste((s) => s.boards);
 
-  // Post-onboarding pose-pack nudge: one dismissible card until all 3
-  // poses have an active photo. Cheap (1h stale) + persisted dismissal.
-  const poseNudgeDismissed = useReel((s) => s.poseNudgeDismissed);
-  const dismissPoseNudge = useReel((s) => s.dismissPoseNudge);
-  const poseQuery = useQuery({
-    queryKey: ['pose-status'],
-    queryFn: fetchPoseStatus,
-    staleTime: 1000 * 60 * 60,
-  });
-  const showPoseNudge =
-    !poseNudgeDismissed &&
-    !poseQuery.isPending &&
-    !poseQuery.isError &&
-    !!poseQuery.data &&
-    missingPoses(poseQuery.data).length > 0;
-
   const onRefresh = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ['plan-day', today] });
-    void queryClient.invalidateQueries({ queryKey: ['pose-status'] });
+    void queryClient.invalidateQueries({ queryKey: ['outfit-renders'] });
   }, [queryClient, today]);
 
   const outfit: PlannedOutfit | undefined = outfitQuery.data;
+
+  // Style my week: 7 AI-planned outfits (text-only plan — free for everyone).
+  // Monday-start week key, mirroring the reel's week.
+  const [weekOpen, setWeekOpen] = useState(false);
+  const monday = (() => {
+    const d = new Date(today + 'T00:00:00Z');
+    const shift = (d.getUTCDay() + 6) % 7;
+    d.setUTCDate(d.getUTCDate() - shift);
+    return d.toISOString().slice(0, 10);
+  })();
+  const weekQuery = useQuery({
+    queryKey: ['plan-week', monday],
+    queryFn: () => api.planWeek({ startDate: monday }),
+    staleTime: 1000 * 60 * 30,
+    enabled: weekOpen,
+  });
+  const week = weekQuery.data ?? null;
+
+  // Renders for today's outfit + week days: once a look is rendered, the hero
+  // and strip show the USER wearing it — not a flat garment shot.
+  const outfitIdsForRenders = useMemo(
+    () =>
+      [
+        ...(outfit ? [outfit.id] : []),
+        ...((week ?? []) as PlannedOutfit[]).map((d) => d.id),
+      ].filter(Boolean),
+    [outfit, week],
+  );
+  const outfitIdKey = outfitIdsForRenders.join(',');
+  const rendersQuery = useQuery({
+    queryKey: ['outfit-renders', outfitIdKey],
+    queryFn: () => api.getOutfitRenders(outfitIdsForRenders),
+    enabled: outfitIdKey.length > 0,
+    staleTime: 1000 * 60 * 5,
+  });
+  const renders = rendersQuery.data ?? {};
+  const heroRender = outfit ? renders[outfit.id] : undefined;
   // "Saved ✓" was sticky across outfit changes (day rollover / pull-to-refresh
   // showed Saved for an outfit never saved) — reset when the hero id changes.
   useEffect(() => {
@@ -143,33 +163,24 @@ export default function PlannerHome() {  const router = useRouter();
         />
       </View>
 
-      {showPoseNudge && (
-        <View
-          style={[styles.nudge, { backgroundColor: colors.surface, borderColor: colors.border }]}
-          testID="pose-nudge"
-        >
-          <Text style={[styles.nudgeText, { color: colors.text }]}>
-            Your weekly reel needs {missingPoses(poseQuery.data!).length} more{' '}
-            {missingPoses(poseQuery.data!).length === 1 ? 'pose' : 'poses'} — capture the pose pack
-            for full-body looks.
-          </Text>
-          <View style={styles.nudgeRow}>
-            <PressScale
-              style={[styles.nudgeCta, { backgroundColor: colors.primary }]}
-              onPress={() => {
-                void hapticFor.select();
-                router.push('/pose-pack');
-              }}
-              testID="pose-nudge-cta"
-            >
-              <Text style={[styles.nudgeCtaText, { color: colors.onPrimary }]}>Capture poses</Text>
-            </PressScale>
-            <Pressable onPress={dismissPoseNudge} hitSlop={12} testID="pose-nudge-dismiss">
-              <Text style={[styles.nudgeDismiss, { color: colors.muted }]}>Dismiss</Text>
-            </Pressable>
-          </View>
+      <PressScale
+        style={[styles.weekCta, { backgroundColor: colors.text }]}
+        onPress={() => {
+          void hapticFor.select();
+          setWeekOpen(true);
+        }}
+        testID="home-style-week"
+      >
+        <Text style={[styles.weekCtaText, { color: colors.background }]}>
+          {week ? 'My week' : 'Style my week'}
+        </Text>
+      </PressScale>
+
+      {weekOpen && weekQuery.isPending ? (
+        <View style={styles.state} testID="week-loading">
+          <Text style={[styles.stateText, { color: colors.muted }]}>Styling your week…</Text>
         </View>
-      )}
+      ) : null}
 
       {outfitQuery.isPending ? (
         <View style={styles.state} testID="home-loading">
@@ -225,6 +236,7 @@ export default function PlannerHome() {  const router = useRouter();
 
           <OutfitCard
             outfitId={outfit.id}
+            imageUrl={heroRender?.outputUrl ?? null}
             garmentImages={outfitGarments
               .map((g) => g.cutoutUrl ?? g.imageUrl)
               .filter((u): u is string => typeof u === 'string' && u.length > 0)}
@@ -282,6 +294,39 @@ export default function PlannerHome() {  const router = useRouter();
             </View>
           )}
 
+      {week && week.length > 0 ? (
+        <View style={[styles.weekStrip, { backgroundColor: colors.surface, borderColor: colors.border }]} testID="week-strip">
+          <Text style={[styles.weekTitle, { color: colors.text }]}>Your week</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.weekRow}>
+            {(week as PlannedOutfit[]).map((d) => {
+              const day = new Date(d.date + 'T00:00:00Z');
+              const label = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'][day.getUTCDay()] ?? '';
+              const dayNum = day.getUTCDate();
+              const dayRender = renders[d.id]?.outputUrl;
+              const first = d.garmentIds
+                .map((id) => garments.find((g) => g.id === id))
+                .find((g) => g !== undefined);
+              const img = dayRender ?? (first ? first.cutoutUrl ?? first.imageUrl : null);
+              const isToday = d.date === today;
+              return (
+                <View key={d.date} style={[styles.dayCard, isToday && { borderColor: colors.primary, borderWidth: 2 }]} testID={`week-day-${d.date}`}>
+                  <Text style={[styles.dayLabel, { color: isToday ? colors.primary : colors.muted }]}>
+                    {label} {dayNum}
+                  </Text>
+                  <View style={[styles.dayImg, { backgroundColor: colors.well ?? colors.border }]}>
+                    {img ? (
+                      <Image source={{ uri: img }} style={{ width: '100%', height: '100%' }} contentFit="cover" transition={150} />
+                    ) : (
+                      <Text style={[styles.dayNone, { color: colors.muted }]}>—</Text>
+                    )}
+                  </View>
+                </View>
+              );
+            })}
+          </ScrollView>
+        </View>
+      ) : null}
+
           {/* Owned-garment thumbnails for transparency */}
           <View style={styles.thumbs}>
             {outfitGarments.map((g) => (
@@ -301,6 +346,16 @@ export default function PlannerHome() {  const router = useRouter();
 }
 
 const styles = StyleSheet.create({
+  weekCta: { borderRadius: 999, paddingVertical: 15, alignItems: 'center', marginTop: 14 },
+  weekCtaText: { fontSize: 15, fontWeight: '800', letterSpacing: 0.3 },
+  weekStrip: { marginTop: 18, borderRadius: 20, borderWidth: 1, padding: 14 },
+  weekTitle: { fontSize: 15, fontWeight: '800', marginBottom: 10 },
+  weekRow: { gap: 10, paddingRight: 8 },
+  dayCard: { width: 74, borderRadius: 14, borderWidth: 1, borderColor: 'transparent', paddingTop: 6 },
+  dayLabel: { fontSize: 11, fontWeight: '700', textAlign: 'center', marginBottom: 6 },
+  dayImg: { width: '100%', aspectRatio: 3 / 4, borderRadius: 12, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  dayNone: { fontSize: 18 },
+
   root: { flex: 1 },
   content: { padding: 16, paddingBottom: 32 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },

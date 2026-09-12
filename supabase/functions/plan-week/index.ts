@@ -37,13 +37,14 @@ Deno.serve(async (req) => {
     }
 
     const sb = admin();
-    const ent = await getEntitlementState(sb, user.id);
+    // Unlocked for ALL tiers: plan-week is text-only (no renders), which costs
+    // ~$0 on the free Gemini text tier. The app_config kill switch remains as
+    // an operator opt-out; money gates stay on image renders only.
     const { data: flag } = await sb.from("app_config").select("value").eq("key", "flags")
       .maybeSingle<{ value: { week_plan_enabled?: boolean } }>();
-    if (ent.tier !== "premium" || flag?.value?.week_plan_enabled !== true) {
-      throw forbidden("v2_locked",
-        "Week planning ships in v2. Premium members get first access.",
-        { tier: ent.tier });
+    if (flag?.value?.week_plan_enabled === false) {
+      throw forbidden("week_plan_disabled",
+        "Week planning is temporarily paused — try again soon.");
     }
 
     const cal = new Map<string, CalendarEntry>();

@@ -69,8 +69,8 @@ export type { RenderViewProps } from './RenderView';
 export { Watermark } from './Watermark';
 export type { WatermarkProps } from './Watermark';
 
-export { ReelCard, REEL_POSE_LABEL, REEL_DISCLOSURE } from './ReelCard';
-export type { ReelCard as ReelCardData, ReelCardProps, ReelPose } from './ReelCard';
+export { ReelCard, REEL_DISCLOSURE } from './ReelCard';
+export type { ReelCard as ReelCardData, ReelCardProps } from './ReelCard';
 
 export { PoseGuide } from './PoseGuide';
 export type { PoseGuideProps, PoseGuidePose, PoseCheck } from './PoseGuide';
