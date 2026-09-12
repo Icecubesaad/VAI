@@ -136,6 +136,9 @@ export const useTaste = create<TasteState>()(
     {
       name: 'vai-taste',
       storage: createJSONStorage(() => mmkvStorage),
+      // v1: identity migrate — existing persisted state is kept as-is.
+      version: 1,
+      migrate: (persisted) => persisted as never,
       partialize: (s) => ({
         connected: s.connected,
         username: s.username,

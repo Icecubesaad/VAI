@@ -203,17 +203,29 @@ async function manipulateTo(
   const ctx = ImageManipulator.manipulate(uri);
   ctx.resize({ width });
   const ref = await ctx.renderAsync();
-  const saved = await ref.saveAsync({
-    compress: quality,
-    format: format === 'webp' ? SaveFormat.WEBP : SaveFormat.JPEG,
-    base64: wantBase64,
-  });
-  return {
-    uri: saved.uri,
-    width: saved.width,
-    height: saved.height,
-    base64: saved.base64 ?? undefined,
-  };
+  try {
+    const saved = await ref.saveAsync({
+      compress: quality,
+      format: format === 'webp' ? SaveFormat.WEBP : SaveFormat.JPEG,
+      base64: wantBase64,
+    });
+    return {
+      uri: saved.uri,
+      width: saved.width,
+      height: saved.height,
+      base64: saved.base64 ?? undefined,
+    };
+  } finally {
+    // ImageRef extends SharedRef: every renderAsync decodes the full-res
+    // source into a native drawable. The quality ladder runs up to 8 renders
+    // per garment — without an eager release they pile up until GC (OOM risk
+    // on low-end devices).
+    try {
+      (ref as unknown as { release?: () => void }).release?.();
+    } catch {
+      // Release is best-effort; GC remains the backstop.
+    }
+  }
 }
 
 /**
@@ -224,15 +236,29 @@ async function manipulateTo(
 export async function compressGarmentPhoto(
   localUri: string,
 ): Promise<CompressResult> {
-  const { width: srcW } = await getSizeAsync(localUri).catch(() => {
+  const { width: srcW, height: srcH } = await getSizeAsync(localUri).catch(() => {
     throw new ImagePipelineError('unreadable', 'Cannot read garment photo.');
   });
-  const startWidth = Math.min(srcW, GARMENT_MAX_WIDTH_PX);
-  const widths = [startWidth, GARMENT_FALLBACK_WIDTH_PX];
+  // Budget is <=1024px on the LONG edge — width-only scaling let a 1000x4000
+  // portrait through at full height (and upscaled narrow shots to 768).
+  const maxEdge = Math.max(srcW, srcH);
+  const scale = maxEdge > GARMENT_MAX_WIDTH_PX ? GARMENT_MAX_WIDTH_PX / maxEdge : 1;
+  const fallbackScale = maxEdge > GARMENT_FALLBACK_WIDTH_PX ? GARMENT_FALLBACK_WIDTH_PX / maxEdge : 1;
+  const widths = [
+    Math.max(1, Math.round(srcW * scale)),
+    Math.max(1, Math.round(srcW * fallbackScale)),
+  ];
+  let lastFailedUri: string | null = null;
 
   for (const width of widths) {
     for (const quality of GARMENT_QUALITIES) {
       const saved = await manipulateTo(localUri, width, 'webp', quality, false);
+      // Failed attempts write a WebP temp file each — delete the previous
+      // one instead of leaking up to 8 files per garment.
+      if (lastFailedUri) {
+        void FileSystem.deleteAsync(lastFailedUri, { idempotent: true }).catch(() => undefined);
+        lastFailedUri = null;
+      }
       const bytes = await fileBytes(saved.uri);
       if (bytes <= GARMENT_MAX_BYTES) {
         const b64 = await FileSystem.readAsStringAsync(saved.uri, {
@@ -248,7 +274,11 @@ export async function compressGarmentPhoto(
           sha256: await sha256OfStringAsync(b64),
         };
       }
+      lastFailedUri = saved.uri;
     }
+  }
+  if (lastFailedUri) {
+    void FileSystem.deleteAsync(lastFailedUri, { idempotent: true }).catch(() => undefined);
   }
   throw new ImagePipelineError(
     'garment_too_heavy',
@@ -554,7 +584,12 @@ export class ResumableUpload {
     const base64 = await FileSystem.readAsStringAsync(localUri, {
       encoding: FileSystem.EncodingType.Base64,
     });
-    const sha256 = await sha256OfStringAsync(base64.slice(0, 1_000_000));
+    // Session identity = head + tail + size. The old prefix-only hash let
+    // two different photos with identical headers resume the WRONG session,
+    // mixing old and new chunks into one remote file.
+    const sha256 = await sha256OfStringAsync(
+      `${base64.slice(0, 1_000_000)}|${base64.slice(-1_000_000)}|${totalBytes}`,
+    );
     let attempts = 0;
 
     let session: ResumableSession | null = null;

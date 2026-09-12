@@ -12,6 +12,7 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '@/theme';
 import { api } from '@/lib/api';
 import { useSession } from '@/store/session';
+import { track } from '@/lib/analytics';
 import { usePaywall } from '@/store/paywall';
 
 const TRIAL_COPY = '7 days free, then $4.99/mo · cancel anytime · no charge today';
@@ -76,6 +77,15 @@ export default function PaywallScreen() {
 
   useEffect(() => {
     void fetchStatus();
+    // The billing funnel's opening event — never emitted anywhere before,
+    // so paywall views (and everything downstream) were unmeasurable.
+    const st = usePaywall.getState();
+    track('paywall_seen', {
+      user_id: useSession.getState().userId ?? 'anonymous',
+      tier: st.tier === 'free' ? 'free' : 'premium',
+      placement: 'onboarding',
+      renders_left: st.rendersLeft,
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -84,6 +84,9 @@ export async function getShopPicks(
     input.userId,
     input.outfitId ?? input.gap ?? 'browse',
     'shop-picks',
+    // Budget/limit/gap changes were deduped to the first query's cached picks.
+    input.budgetBand ?? '',
+    String(input.limit ?? ''),
   ]);
   const res = await callEdgeFunction<{ picks: AffiliateProduct[] }>(
     'shop-picks',

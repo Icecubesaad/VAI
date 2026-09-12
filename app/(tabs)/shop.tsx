@@ -121,7 +121,7 @@ export default function ShopScreen() {
             product_id: id,
             title: item.title,
             image_url: item.imageUrl,
-            price: item.price,
+            price: item.price ?? null,
             affiliate_url: item.affiliateUrl,
           })
           .then(({ error }) => {
@@ -192,7 +192,9 @@ export default function ShopScreen() {
             {item.valueAddReason}
           </Text>
           <View style={styles.row}>
-            <Text style={[styles.price, { color: colors.text }]}>${item.price.toFixed(2)}</Text>
+            {item.price != null ? (
+              <Text style={[styles.price, { color: colors.text }]}>${item.price.toFixed(2)}</Text>
+            ) : null}
             <Pressable
               onPress={() => toggleWish(item)}
               hitSlop={12}

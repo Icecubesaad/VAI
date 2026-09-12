@@ -24,6 +24,8 @@ import { useTaste } from '@/store/taste';
 import { useTastePrefs } from '@/store/taste-prefs';
 import { useQuotas } from '@/store/quotas';
 import { api } from '@/lib/api';
+import { initAnalytics } from '@/lib/analytics';
+import { setSentryUser } from '@/lib/sentry';
 
 const PRIVACY_URL = 'https://vai.style/privacy';
 const U13_COPY =
@@ -110,6 +112,8 @@ export default function AuthScreen() {
         useSession.getState().setOnboardingStep('quiz');
       }
       useSession.getState().setFunnelOwner(userId);
+      setSentryUser(userId);
+      void initAnalytics(userId, 'free').catch(() => undefined);
       const parentalConsentAt =
         gate.ageBand === 'p13_17' && gate.parentalConsent ? new Date().toISOString() : null;
       useSession.getState().setAgeGate({

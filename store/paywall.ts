@@ -9,6 +9,7 @@ import {
   restorePurchases,
 } from '@/lib/billing';
 import { scheduleTrialDay5Reminder } from '@/lib/push';
+import { track } from '@/lib/analytics';
 import { useQuotas } from './quotas';
 import { useSession } from './session';
 import { mmkvStorage } from './mmkv';
@@ -169,6 +170,8 @@ export const usePaywall = create<PaywallState>()(
           } catch {
             // Reminder scheduling must never fail the purchase.
           }
+          // Funnel: the trial purchase completed at the store.
+          track('trial_started', { user_id: userId, tier: 'premium' as const });
           // Paywall-status merge: server (webhook) is tier truth; refresh it.
           // If the webhook lags, the purchase still succeeded at the store —
           // the caller dismisses and the next fetchStatus converges.
@@ -266,6 +269,9 @@ export const usePaywall = create<PaywallState>()(
     {
       name: 'vai-paywall',
       storage: createJSONStorage(() => mmkvStorage),
+      // v1: identity migrate — existing persisted state is kept as-is.
+      version: 1,
+      migrate: (persisted) => persisted as never,
       partialize: (s) => ({
         tier: s.tier,
         trialEndsAt: s.trialEndsAt,

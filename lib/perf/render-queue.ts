@@ -182,6 +182,22 @@ function saveOutbox(actions: OfflineAction[]): void {
   mmkv.set(OUTBOX_KEY, JSON.stringify(actions));
 }
 
+const DEAD_LETTER_KEY = 'render-queue:dead-letter:v1';
+const DEAD_LETTER_CAP = 25;
+
+/** Bounded parking lot for permanently-failed outbox actions (forensics). */
+function parkDeadLetters(dead: OfflineAction[]): void {
+  if (dead.length === 0) return;
+  try {
+    const raw = mmkv.getString(DEAD_LETTER_KEY);
+    const parked = raw ? (JSON.parse(raw) as OfflineAction[]) : [];
+    const merged = [...(Array.isArray(parked) ? parked : []), ...dead].slice(-DEAD_LETTER_CAP);
+    mmkv.set(DEAD_LETTER_KEY, JSON.stringify(merged));
+  } catch {
+    // Forensics are best-effort; the queue itself is already corrected.
+  }
+}
+
 export function createRenderQueue(deps: {
   transport: RenderTransport;
   isOnline: () => boolean;
@@ -390,6 +406,7 @@ export function createRenderQueue(deps: {
       flushOutbox: async (sender) => {
         const pending = [...get().outbox];
         const remaining: OfflineAction[] = [];
+        const dead: OfflineAction[] = [];
         for (const action of pending) {
           try {
             await sender(action);
@@ -402,13 +419,14 @@ export function createRenderQueue(deps: {
                 lastError: String(err),
               });
             } else {
-              // Dead-letter: kept out of the queue so one poison action
-              // can't block the rest. Surfaced via Sentry by the caller.
-              remaining.push({ ...action, attempts, lastError: `dead-letter: ${String(err)}` });
-              break;
+              // Dead-letter: parked OUT of the queue. The old code pushed the
+              // poison action back with maxed attempts (re-sent forever) and
+              // `break`-ed — silently dropping every action queued after it.
+              dead.push({ ...action, attempts, lastError: `dead-letter: ${String(err)}` });
             }
           }
         }
+        parkDeadLetters(dead);
         saveOutbox(remaining);
         set({ outbox: remaining });
       },

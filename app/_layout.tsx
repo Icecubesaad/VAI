@@ -24,6 +24,8 @@ import {
 import { useSession } from '@/store/session';
 import { usePaywall } from '@/store/paywall';
 import { registerPushToken } from '@/lib/push';
+import { initAnalytics } from '@/lib/analytics';
+import { initSentry, setSentryUser } from '@/lib/sentry';
 
 // Perf loading recipe (CONTRACT-perf.md + APP-LOADING-SPLASH.md): mark launch
 // + hold the OS splash BEFORE first render. `awaitAppReady` hides the splash
@@ -309,6 +311,9 @@ export default function RootLayout() {
       }
       try {
         hydrateCachesSync();
+        // Error reporting + product analytics init: both helpers previously
+        // had ZERO callers — the billing funnel was completely unmeasurable.
+        void initSentry().catch(() => undefined);
         const [sessionRes, initialUrl, pushLink] = await Promise.all([
           getSupabase().auth.getSession().catch(() => null),
           Linking.getInitialURL().catch(() => null),
@@ -317,6 +322,10 @@ export default function RootLayout() {
         const u = sessionRes?.data.session?.user;
         if (u) {
           useSession.getState().setAuth({ userId: u.id, email: u.email ?? null });
+          setSentryUser(u.id);
+          void initAnalytics(u.id, usePaywall.getState().tier === 'free' ? 'free' : 'premium').catch(
+            () => undefined,
+          );
           // Push registration was previously never called anywhere — no token
           // ever reached push_tokens, so render-ready pushes could not fire.
           // Fire-and-forget: permission prompt only on first run; the server

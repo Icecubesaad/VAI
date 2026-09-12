@@ -51,6 +51,9 @@ export const useCloset = create<ClosetState>()(
     {
       name: 'vai-closet',
       storage: createJSONStorage(() => mmkvStorage),
+      // v1: identity migrate — existing persisted state is kept as-is.
+      version: 1,
+      migrate: (persisted) => persisted as never,
     },
   ),
 );

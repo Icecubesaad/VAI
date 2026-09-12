@@ -116,8 +116,10 @@ export const AUTO_TAG_SYSTEM_PROMPT = [
 ].join('\n');
 
 export function buildAutoTagPrompt(hint?: string): string {
+  // Capped like pose-transfer's stance note (280) — an unbounded hint shipped
+  // arbitrary user text straight into the server LLM prompt (cost + abuse).
   return hint && hint.trim().length > 0
-    ? `${AUTO_TAG_SYSTEM_PROMPT}\nUser hint (may be wrong — image wins): ${hint.trim()}`
+    ? `${AUTO_TAG_SYSTEM_PROMPT}\nUser hint (may be wrong — image wins): ${hint.trim().slice(0, 280)}`
     : AUTO_TAG_SYSTEM_PROMPT;
 }
 
@@ -196,7 +198,14 @@ export async function requestAutoTag(
   }
   const idempotencyKey =
     params.idempotencyKey ??
-    (await generateIdempotencyKey([params.userId, params.imageUrl ?? params.imageBase64!.slice(0, 64), 'auto-tag']));
+    (await generateIdempotencyKey([
+      params.userId,
+      params.imageUrl ?? params.imageBase64 ?? 'auto-tag',
+      // Full image participates: the first 64 base64 chars are the JPEG/PNG
+      // header — near-identical across a device session, so two different
+      // garments could collide and inherit each other's tags.
+      params.hint ?? '',
+    ]));
   const base = {
     image_url: params.imageUrl,
     image_base64: params.imageBase64,

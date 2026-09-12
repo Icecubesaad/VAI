@@ -5,7 +5,6 @@
  */
 export * from './image-pipeline';
 export * from './cache';
-export * from './quotas';
 export * from './render-queue';
 export * from './lists';
 export * from './reel-prefetch';

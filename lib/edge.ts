@@ -247,9 +247,12 @@ export async function callEdgeFunction<TResponse>(
     } finally {
       clearTimeout(timer);
     }
-    const wait = lastError instanceof EdgeError && lastError.retryAfterMs !== undefined
+    // Honor Retry-After, but capped: a hostile/misconfigured 429 with
+    // `Retry-After: 3600` used to suspend the awaiting UI call for an hour.
+    const rawWait = lastError instanceof EdgeError && lastError.retryAfterMs !== undefined
       ? lastError.retryAfterMs
       : backoffMs(attempt, baseDelayMs);
+    const wait = Math.min(rawWait, 30_000);
     await sleep(wait);
   }
   throw lastError;

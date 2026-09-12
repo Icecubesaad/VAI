@@ -249,17 +249,6 @@ export function invalidateOnGarmentMutation(): void {
   closetCache.invalidate();
 }
 
-/** Render settled (done/failed): quota numbers moved server-side. */
-export function invalidateOnRenderSettled(): void {
-  quotaCache.invalidate();
-}
-
-/** Purchase / restore / trial start / cancel: everything money-adjacent is suspect. */
-export function invalidateOnPurchase(): void {
-  quotaCache.invalidate();
-  paywallCache.invalidate();
-}
-
 /** Quiz retake or style-profile edit. */
 export function invalidateOnDnaChange(): void {
   dnaCache.invalidate();

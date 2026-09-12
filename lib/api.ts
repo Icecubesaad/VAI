@@ -129,8 +129,10 @@ export interface ProductPick {
   productId: string;
   title: string;
   imageUrl: string;
-  price: number;
+  /** Null when the server omitted it — the UI hides the price (never "$0.00"). */
+  price: number | null;
   rating?: number | null;
+  /** Blank when the server omitted it — never a fabricated retailer. */
   retailer: string;
   affiliateUrl: string;
   badge?: 'Fills gap' | 'Own similar' | null;
@@ -463,9 +465,9 @@ function mapProductPick(raw: unknown): ProductPick {
     productId: pickStr(r['productId'], r['product_id'], r['id']) ?? '',
     title: pickStr(r['title'], r['name']) ?? 'Untitled pick',
     imageUrl: pickStr(r['imageUrl'], r['image_url']) ?? '',
-    price: pickNum(r['price'], r['salePrice']) ?? 0,
+    price: pickNum(r['price'], r['salePrice']),
     rating: pickNum(r['rating']),
-    retailer: pickStr(r['retailer'], r['brand']) ?? 'ShopStyle',
+    retailer: pickStr(r['retailer'], r['brand']) ?? '',
     affiliateUrl: pickStr(r['affiliateUrl'], r['affiliate_url'], r['clickUrl']) ?? '',
     badge: badgeRaw === 'Fills gap' || badgeRaw === 'Own similar' ? badgeRaw : null,
     valueAddReason: pickStr(r['valueAddReason'], r['value_add_reason']) ?? '',

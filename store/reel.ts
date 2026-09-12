@@ -169,6 +169,9 @@ export const useReel = create<ReelState>()(
     {
       name: 'vai-reel',
       storage: createJSONStorage(() => mmkvStorage),
+      // v1: identity migrate — existing persisted state is kept as-is.
+      version: 1,
+      migrate: (persisted) => persisted as never,
       partialize: (s) => ({
         weekOf: s.weekOf,
         drop: s.drop,

@@ -145,40 +145,6 @@ export function buildPlanDayPrompt(input: PlanDayInput): string {
   return lines.join('\n');
 }
 
-// ------------------------------------------------------- why-line
-
-const WHY_TEMPLATES: Array<(ctx: {
-  top: string;
-  weather: WeatherInput;
-  event?: EventInput;
-  tempWord: string;
-}) => string> = [
-  ({ top, weather, event, tempWord }) =>
-    `${top} handles the ${tempWord} ${weather.condition.toLowerCase()}${event?.title ? ` and fits ${event.title}` : ''} without trying too hard.`,
-  ({ top, weather, event, tempWord }) =>
-    `Picked ${top} for ${tempWord} weather${event?.dressCode ? ` — reads ${event.dressCode} without overdressing` : ''}.`,
-  ({ top, weather, event }) =>
-    `${top} earns its wear-count today: right weight for ${weather.tempC}°C${event?.venue === 'outdoor' ? ' and an outdoor venue' : ''}.`,
-  ({ top, weather, event, tempWord }) =>
-    `A ${tempWord}-day call: ${top}${event?.formality !== undefined && event.formality >= 4 ? ', lifted to formal with the rest of the fit' : ', kept easy with the rest of the fit'}.`,
-];
-
-function hashString(s: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return Math.abs(h);
-}
-
-function tempWord(tempC: number): string {
-  if (tempC <= 5) return 'cold';
-  if (tempC <= 15) return 'crisp';
-  if (tempC <= 24) return 'mild';
-  return 'warm';
-}
-
 /**
  * Narrow the `ReadonlyMap | Record` garment index. `instanceof Map` alone
  * does not narrow `ReadonlyMap` (interface) out of the union for the
@@ -190,27 +156,6 @@ function lookupGarment(
 ): ClosetGarmentLite | undefined {
   if (garmentsById instanceof Map) return garmentsById.get(id);
   return (garmentsById as Record<string, ClosetGarmentLite>)[id];
-}
-
-/**
- * Deterministic, $0 why-line generator for instant UI (no LLM round-trip).
- * Template is picked by hashing garmentIds+date so repeated renders of the
- * same inputs are stable, while different outfits read differently.
- * The server LLM why_line wins when present; this is the offline/fallback path.
- */
-export function generateWhyLine(
-  garmentIds: string[],
-  garmentsById: ReadonlyMap<string, ClosetGarmentLite> | Record<string, ClosetGarmentLite>,
-  weather: WeatherInput,
-  event?: EventInput,
-): string {
-  if (garmentIds.length === 0) return 'Add a few closet staples and I will build today\u2019s outfit.';
-  const lookup = (id: string): ClosetGarmentLite | undefined => lookupGarment(garmentsById, id);
-  const firstId = garmentIds[0] as string;
-  const first = lookup(firstId);
-  const top = first ? `${first.category} in ${first.colors[0] ?? 'your palette'}` : 'this combination';
-  const pick = WHY_TEMPLATES[hashString(`${garmentIds.join(',')}`) % WHY_TEMPLATES.length] as (typeof WHY_TEMPLATES)[number];
-  return pick({ top, weather, event, tempWord: tempWord(weather.tempC) });
 }
 
 // ------------------------------------------------------- validation
@@ -322,7 +267,19 @@ export async function planDay(
   ctx: Omit<Parameters<typeof validatePlan>[1], 'date' | 'ownedIds'> & { hemisphere?: 'northern' | 'southern' },
   edgeOpts: EdgeCallOptions = {},
 ): Promise<PlanDayResult> {
-  const key = await generateIdempotencyKey([input.userId, input.date, 'plan-day']);
+  // The key covers EVERY plan input: with only user+date, re-planning after a
+  // closet change / laundry event / history roll returned the deduped stale
+  // plan forever (and defeated the documented repair loop).
+  const key = await generateIdempotencyKey([
+    input.userId,
+    input.date,
+    'plan-day',
+    [...input.ownedGarmentIds].sort().join(','),
+    JSON.stringify(input.weather ?? null),
+    JSON.stringify(input.event ?? null),
+    (input.history ?? []).map((h) => `${h.date}:${[...(h.garmentIds ?? [])].sort().join(',')}`).join(','),
+    [...(input.laundryBlockedIds ?? [])].sort().join(','),
+  ]);
   const attempt = async (prompt: string, idemKey: string): Promise<PlanDayResponse> =>
     callEdgeFunction<PlanDayResponse>('plan-day', {
       date: input.date,
@@ -371,7 +328,15 @@ export async function planWeek(
   edgeOpts: EdgeCallOptions = {},
 ): Promise<PlanWeekResult> {
   if (days.length !== 7) throw new Error(`planWeek requires exactly 7 days, got ${days.length}.`);
-  const key = await generateIdempotencyKey([days[0]?.userId ?? 'x', days[0]?.date ?? 'x', 'plan-week']);
+  const key = await generateIdempotencyKey([
+    days[0]?.userId ?? 'x',
+    'plan-week',
+    days.map((d) => d.date).join(','),
+    ...days.map((d) => [...d.ownedGarmentIds].sort().join(',')),
+    JSON.stringify(days.map((d) => d.weather ?? null)),
+    JSON.stringify(days.map((d) => d.event ?? null)),
+    (days[0]?.history ?? []).map((h) => `${h.date}:${[...(h.garmentIds ?? [])].sort().join(',')}`).join(','),
+  ]);
   const res = await callEdgeFunction<{ days: Record<string, PlanDayResponse> }>(
     'plan-week',
     {
