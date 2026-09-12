@@ -1,8 +1,9 @@
 import React, { memo } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import Svg, { Ellipse, Path } from 'react-native-svg';
 import { hapticFor } from '../lib/haptics';
 import { Button } from './Button';
+import { PressScale } from './PressScale';
 
 export type PoseGuidePose = 'front' | 'step' | 'detail';
 
@@ -135,11 +136,13 @@ export const PoseGuide = memo(function PoseGuide({
           {ORDER.map((p) => {
             const selected = p === pose;
             return (
-              <Pressable
+              <PressScale
                 key={p}
+                testID={testID ? `${testID}-${p}-cta` : `pose-guide-${p}-cta`}
                 accessibilityRole="button"
                 accessibilityLabel={`${META[p].title}${selected ? ', selected' : ''}`}
                 accessibilityState={{ selected }}
+                hitSlop={8}
                 onPress={() => {
                   if (!selected) {
                     void hapticFor.select();
@@ -151,7 +154,7 @@ export const PoseGuide = memo(function PoseGuide({
                 <Text className={`text-[13px] leading-[18px] font-bold ${selected ? 'text-white' : 'text-white/70'}`}>
                   {META[p].title}
                 </Text>
-              </Pressable>
+              </PressScale>
             );
           })}
         </View>

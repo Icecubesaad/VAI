@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -9,6 +11,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import type { ViewToken } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { FlashList } from '@shopify/flash-list';
@@ -89,6 +92,75 @@ function dropCostUsd(cards: ReelCardData[]): { cost_usd: number; pending_count: 
 // Deep links `vai://reel` + `vai://outfit/<date>` land here (root layout).
 // ---------------------------------------------------------------------------
 
+/**
+ * Module-scope: FlashList does not support changing `viewabilityConfig` on
+ * the fly — this must stay a stable reference, never an inline object.
+ * 70% of a full-screen card = exactly one card viewable per page.
+ */
+const REEL_VIEWABILITY_CONFIG = { itemVisiblePercentThreshold: 70 };
+
+type ReelPagerRowProps = {
+  card: ReelCardData;
+  pageH: number;
+  garmentThumbs: Record<string, string>;
+  quotaLeft: number;
+  quotaCap: number;
+  onWear: (card: ReelCardData) => void;
+  onTry: (card: ReelCardData) => void;
+  onShop: (card: ReelCardData) => void;
+  onSave: (cardId: string) => void;
+  onRegenerate: (card: ReelCardData) => void;
+  onUpgrade: () => void;
+};
+
+/**
+ * Memoized pager cell — the FlashList recycling boundary. Subscribes to its
+ * OWN `saved` / `loading` bits so a save or regen-state change re-renders
+ * exactly one row, never the whole pager. All callbacks are screen-stable and
+ * take the card/id, so the per-row closures below only rebuild when THIS
+ * row re-renders (its own props changed) instead of defeating the memo.
+ */
+const ReelPagerRow = memo(function ReelPagerRow({
+  card,
+  pageH,
+  garmentThumbs,
+  quotaLeft,
+  quotaCap,
+  onWear,
+  onTry,
+  onShop,
+  onSave,
+  onRegenerate,
+  onUpgrade,
+}: ReelPagerRowProps): React.JSX.Element {
+  const saved = useReel((s) => s.savedIds[card.id] === true);
+  const loading = useReel((s) => s.regeneratingId === card.id);
+  const handleWear = useCallback(() => onWear(card), [onWear, card]);
+  const handleTry = useCallback(() => onTry(card), [onTry, card]);
+  const handleShop = useCallback(() => onShop(card), [onShop, card]);
+  const handleSave = useCallback(() => onSave(card.id), [onSave, card.id]);
+  const handleRegenerate = useCallback(() => onRegenerate(card), [onRegenerate, card]);
+  return (
+    <View style={{ height: pageH }} testID={`reel-page-${card.id}`}>
+      <ReelCard
+        card={card}
+        onWear={handleWear}
+        onTry={handleTry}
+        onShop={handleShop}
+        onSave={handleSave}
+        onRegenerate={handleRegenerate}
+        saved={saved}
+        garmentThumbs={garmentThumbs}
+        quotaLeft={quotaLeft}
+        quotaCap={quotaCap}
+        onUpgrade={onUpgrade}
+        loading={loading}
+        testID={`reel-card-${card.id}`}
+      />
+    </View>
+  );
+});
+
 export default function ReelScreen() {
   const router = useRouter();
   const { colors } = useTheme();
@@ -102,22 +174,17 @@ export default function ReelScreen() {
   const cachedWeek = useReel((s) => s.weekOf);
   const fetching = useReel((s) => s.fetching);
   const fetchError = useReel((s) => s.fetchError);
-  const savedIds = useReel((s) => s.savedIds);
   const regeneratingId = useReel((s) => s.regeneratingId);
   const regensLeft = useReel((s) => s.regeneratesLeft());
   const ensureWeek = useReel((s) => s.ensureWeek);
   const refreshWeek = useReel((s) => s.refreshWeek);
   const styleMyWeek = useReel((s) => s.styleMyWeek);
   const toggleSave = useReel((s) => s.toggleSave);
-  const userId = useSession((s) => s.userId);
-  const tier = usePaywall((s) => s.tier);
   const quotaLeft = usePaywall((s) => s.rendersLeft);
   const quotaCap = usePaywall((s) => (s.tier === 'free' ? s.lifetimeCap : s.monthlyCap));
 
   const [poses, setPoses] = useState<Record<ReelPose, boolean> | null>(null);
   const [listH, setListH] = useState<number | null>(null);
-  const [wornIds, setWornIds] = useState<Record<string, true>>({});
-  const [wearPending, setWearPending] = useState<Record<string, true>>({});
   const [wearError, setWearError] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
   const [regenTarget, setRegenTarget] = useState<ReelCardData | null>(null);
@@ -139,6 +206,17 @@ export default function ReelScreen() {
   }
   const dataRef = useRef<ReelCardData[]>([]);
   const lastIndexRef = useRef(0);
+  // Last index already sent to the prefetcher — repeat viewability events for
+  // the same page skip the update (no redundant prefetch windows on scroll).
+  const updatedIndexRef = useRef(-1);
+  // Prefetch adapter (perf ReelCard shape) memoized per drop in the effect
+  // below, so viewability callbacks never allocate on the scroll path.
+  const prefetchAdapterRef = useRef<{ id: string; fullResUrl: string; thumbUrl: string }[]>([]);
+  // Wear guards live in refs, not state: the pager passes no worn state to
+  // rows, so a state mirror would re-render the whole pager for zero visual
+  // change (and destabilize handleWear → renderItem → every memo row).
+  const wornRef = useRef<Set<string>>(new Set());
+  const wearBusyRef = useRef<Set<string>>(new Set());
   const viewedRef = useRef<Set<string>>(new Set());
   const mountMsRef = useRef(Date.now());
   const ttiReportedRef = useRef(false);
@@ -189,8 +267,23 @@ export default function ReelScreen() {
   }, []);
 
   const cards = drop && cachedWeek === weekOf ? drop.cards : null;
-  dataRef.current = cards ?? [];
   const pageH = listH ?? winH;
+
+  // Scroll-path refs mirror the drop (no render-body assignment — concurrent
+  // unsafe). The adapter is rebuilt per drop, not per viewability event, so
+  // the scroll callbacks stay allocation-free. NOTE: the API exposes no
+  // thumbnail variant for reel cards (imageUrl only, AVIF/WebP ≤ 350 KB by
+  // contract), so thumbUrl reuses imageUrl — the prefetch queue dedupes.
+  useEffect(() => {
+    const list = cards ?? [];
+    dataRef.current = list;
+    prefetchAdapterRef.current = list.map((c) => ({
+      id: c.id,
+      fullResUrl: c.imageUrl,
+      thumbUrl: c.imageUrl,
+    }));
+    updatedIndexRef.current = -1;
+  }, [cards]);
 
   // First card interactive → TTI; drop on screen → weekly_drop_completed with
   // the server-authoritative cost sum (REQUIRED props — pending-card estimates
@@ -229,15 +322,17 @@ export default function ReelScreen() {
       const first = viewableItems[0];
       const idx = typeof first?.index === 'number' ? first.index : 0;
       lastIndexRef.current = idx;
-      const data = dataRef.current;
-      if (data.length > 0) {
-        prefetcherRef.current?.update(
-          data.map((c) => ({ id: c.id, fullResUrl: c.imageUrl, thumbUrl: c.imageUrl })),
-          idx,
-        );
+      // Same-page repeats (settling, re-layout) skip the prefetch window
+      // rebuild — the ±1 window for this index is already in flight/cached.
+      if (idx !== updatedIndexRef.current) {
+        updatedIndexRef.current = idx;
+        const prefetchData = prefetchAdapterRef.current;
+        if (prefetchData.length > 0) {
+          prefetcherRef.current?.update(prefetchData, idx);
+        }
       }
       const raw = first?.item as ReelCardData | undefined;
-      const card = raw && typeof raw.id === 'string' ? raw : data[idx];
+      const card = raw && typeof raw.id === 'string' ? raw : dataRef.current[idx];
       if (card && !viewedRef.current.has(card.id)) {
         viewedRef.current.add(card.id);
         const uid = useSession.getState().userId;
@@ -262,61 +357,52 @@ export default function ReelScreen() {
     const p = prefetcherRef.current;
     if (!p) return;
     p.notifyFling(false);
-    const data = dataRef.current;
+    const data = prefetchAdapterRef.current;
     if (data.length > 0) {
-      p.update(
-        data.map((c) => ({ id: c.id, fullResUrl: c.imageUrl, thumbUrl: c.imageUrl })),
-        lastIndexRef.current,
-      );
+      p.update(data, lastIndexRef.current);
+      updatedIndexRef.current = lastIndexRef.current;
     }
   }, []);
 
   // Wear-it-today → `increment_wear` RPC + local mirror (wear counts + CPW
   // update instantly) + worn mark. Failures surface inline, never silent.
-  const handleWear = useCallback(
-    (card: ReelCardData) => {
-      if (wornIds[card.id] || wearPending[card.id]) return;
-      setWearPending((p) => ({ ...p, [card.id]: true }));
-      setWearError(null);
-      void (async () => {
-        try {
-          const { error } = await supabase.rpc('increment_wear', { ids: card.garmentIds });
-          if (error) throw error;
-          const st = useCloset.getState();
-          for (const gid of card.garmentIds) {
-            const g = st.items[gid];
-            if (g) {
-              const wearCount = g.wearCount + 1;
-              st.upsert({
-                ...g,
-                wearCount,
-                costPerWear: g.pricePaid != null ? g.pricePaid / wearCount : null,
-              });
-            }
-          }
-          setWornIds((prev) => ({ ...prev, [card.id]: true }));
-          const uid = useSession.getState().userId;
-          if (uid) {
-            track('reel_wear_it_today', {
-              user_id: uid,
-              tier: toAnalyticsTier(usePaywall.getState().tier),
-              date: new Date().toISOString().slice(0, 10),
-              pose: card.pose,
+  const handleWear = useCallback((card: ReelCardData) => {
+    if (wornRef.current.has(card.id) || wearBusyRef.current.has(card.id)) return;
+    wearBusyRef.current.add(card.id);
+    setWearError(null);
+    void (async () => {
+      try {
+        const { error } = await supabase.rpc('increment_wear', { ids: card.garmentIds });
+        if (error) throw error;
+        const st = useCloset.getState();
+        for (const gid of card.garmentIds) {
+          const g = st.items[gid];
+          if (g) {
+            const wearCount = g.wearCount + 1;
+            st.upsert({
+              ...g,
+              wearCount,
+              costPerWear: g.pricePaid != null ? g.pricePaid / wearCount : null,
             });
           }
-        } catch {
-          setWearError('Could not log this outfit. Check your connection and try again.');
-        } finally {
-          setWearPending((p) => {
-            const next = { ...p };
-            delete next[card.id];
-            return next;
+        }
+        wornRef.current.add(card.id);
+        const uid = useSession.getState().userId;
+        if (uid) {
+          track('reel_wear_it_today', {
+            user_id: uid,
+            tier: toAnalyticsTier(usePaywall.getState().tier),
+            date: new Date().toISOString().slice(0, 10),
+            pose: card.pose,
           });
         }
-      })();
-    },
-    [wornIds, wearPending],
-  );
+      } catch {
+        setWearError('Could not log this outfit. Check your connection and try again.');
+      } finally {
+        wearBusyRef.current.delete(card.id);
+      }
+    })();
+  }, []);
 
   // Try → try-on studio with the card's render context (real outfit id only;
   // the studio falls back to garment_refs when it is absent).
@@ -483,40 +569,48 @@ export default function ReelScreen() {
     })();
   }, [styleMyWeek, weekOf, poses, router]);
 
+  const handleUpgrade = useCallback(() => {
+    router.push('/onboarding/paywall');
+  }, [router]);
+
+  // Thin + stable: every callback prop is screen-stable, so FlashList rows
+  // keep their memo across scrolls. Per-row variance (saved/loading) is
+  // subscribed inside ReelPagerRow, not threaded through here.
   const renderItem = useCallback(
     ({ item }: { item: ReelCardData }) => (
-      <View style={{ height: pageH }} testID={`reel-page-${item.id}`}>
-        <ReelCard
-          card={item}
-          onWear={() => handleWear(item)}
-          onTry={() => handleTry(item)}
-          onShop={() => handleShop(item)}
-          onSave={() => handleSave(item.id)}
-          onRegenerate={() => openRegen(item)}
-          saved={savedIds[item.id] === true}
-          garmentThumbs={garmentThumbs}
-          quotaLeft={quotaLeft}
-          quotaCap={quotaCap}
-          onUpgrade={() => router.push('/onboarding/paywall')}
-          loading={regeneratingId === item.id}
-          testID={`reel-card-${item.id}`}
-        />
-      </View>
+      <ReelPagerRow
+        card={item}
+        pageH={pageH}
+        garmentThumbs={garmentThumbs}
+        quotaLeft={quotaLeft}
+        quotaCap={quotaCap}
+        onWear={handleWear}
+        onTry={handleTry}
+        onShop={handleShop}
+        onSave={handleSave}
+        onRegenerate={openRegen}
+        onUpgrade={handleUpgrade}
+      />
     ),
     [
       pageH,
+      garmentThumbs,
+      quotaLeft,
+      quotaCap,
       handleWear,
       handleTry,
       handleShop,
       handleSave,
       openRegen,
-      savedIds,
-      garmentThumbs,
-      quotaLeft,
-      quotaCap,
-      regeneratingId,
-      router,
+      handleUpgrade,
     ],
+  );
+
+  // External deps renderItem closes over (FlashList PureComponent contract:
+  // rows re-render when data items change OR this reference changes).
+  const pagerExtra = useMemo(
+    () => ({ pageH, garmentThumbs, quotaLeft, quotaCap }),
+    [pageH, garmentThumbs, quotaLeft, quotaCap],
   );
 
   const missing = poses ? missingPoses(poses) : [];
@@ -600,8 +694,9 @@ export default function ReelScreen() {
             data={cards}
             keyExtractor={keyById}
             renderItem={renderItem}
+            extraData={pagerExtra}
             onViewableItemsChanged={onViewableItemsChanged}
-            viewabilityConfig={{ itemVisiblePercentThreshold: 70 }}
+            viewabilityConfig={REEL_VIEWABILITY_CONFIG}
             onMomentumScrollBegin={onMomentumBegin}
             onMomentumScrollEnd={onMomentumEnd}
             showsVerticalScrollIndicator={false}
@@ -617,8 +712,22 @@ export default function ReelScreen() {
         animationType="slide"
         onRequestClose={() => setRegenTarget(null)}
       >
-        <View style={styles.sheetScrim}>
-          <View style={[styles.sheetBox, { backgroundColor: colors.surface }]} testID="regen-sheet">
+        <KeyboardAvoidingView
+          style={styles.sheetScrim}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => setRegenTarget(null)}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss remix sheet"
+            testID="regen-backdrop"
+          />
+          <SafeAreaView
+            edges={['bottom']}
+            style={[styles.sheetBox, { backgroundColor: colors.surface }]}
+            testID="regen-sheet"
+          >
             <Text style={[styles.sheetTitle, { color: colors.text }]}>Remix this look</Text>
             <Text style={[styles.sheetSub, { color: colors.muted }]} testID="regen-budget">
               {regensLeft} of {MAX_REGENERATES_PER_WEEK} remixes left this week · 1 credit each
@@ -667,8 +776,8 @@ export default function ReelScreen() {
                 )}
               </Pressable>
             </View>
-          </View>
-        </View>
+          </SafeAreaView>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );

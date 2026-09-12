@@ -1,6 +1,7 @@
 import React, { memo, useEffect, useRef, useState } from 'react';
-import { Animated, Pressable, Text, View } from 'react-native';
+import { Animated, Text, View } from 'react-native';
 import { hapticFor } from '../lib/haptics';
+import { PressScale } from './PressScale';
 
 /** Style-refresh cadence for the invisible-Pinterest settings surface. */
 export type TasteCadenceValue = 'daily' | 'weekly' | 'off';
@@ -79,7 +80,7 @@ export const TasteCadence = memo(function TasteCadence({
         accessibilityState={{ disabled: locked, busy: syncing }}
         onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
         className={`relative flex-row rounded-pill border border-line bg-paperDeep p-[4px] ${
-          locked ? 'opacity-60' : ''
+          locked ? 'opacity-50' : ''
         }`}
       >
         {thumbWidth > 0 ? (
@@ -92,7 +93,7 @@ export const TasteCadence = memo(function TasteCadence({
         {OPTIONS.map((o) => {
           const selected = o.value === value;
           return (
-            <Pressable
+            <PressScale
               key={o.value}
               testID={testID ? `${testID}-${o.value}` : `taste-cadence-${o.value}`}
               accessibilityRole="radio"
@@ -100,13 +101,14 @@ export const TasteCadence = memo(function TasteCadence({
               accessibilityLabel={`${o.label}${selected ? ', selected' : ''}`}
               accessibilityHint={o.hint}
               disabled={locked}
+              hitSlop={8}
               onPress={() => {
                 if (!selected) {
                   void hapticFor.select();
                   onChange(o.value);
                 }
               }}
-              className="z-10 flex-1 items-center justify-center rounded-pill py-sm active:opacity-80"
+              className={`z-10 flex-1 items-center justify-center rounded-pill py-sm active:opacity-80 ${locked ? 'opacity-50' : ''}`}
             >
               <Text
                 className={`text-[14px] leading-[20px] font-semibold ${
@@ -115,7 +117,7 @@ export const TasteCadence = memo(function TasteCadence({
               >
                 {o.label}
               </Text>
-            </Pressable>
+            </PressScale>
           );
         })}
       </View>

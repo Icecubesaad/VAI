@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { FlashList } from '@shopify/flash-list';
 import { Image } from 'expo-image';
 import { useQuery } from '@tanstack/react-query';
@@ -22,10 +22,21 @@ export default function ShopScreen() {
   const userId = useSession((s) => s.userId);
   const tier = usePaywall((s) => s.tier);
   const [wishlist, setWishlist] = useState<Set<string>>(new Set());
+  const [wishError, setWishError] = useState<string | null>(null);
+  // Reel card entry scopes gap picks to that outfit (reel handleShop forwards
+  // `outfitId`; direct tab entry has no param → unscoped picks).
+  const params = useLocalSearchParams<{ outfitId?: string | string[] }>();
+  const rawOutfit: string | string[] | undefined = params.outfitId;
+  const outfitParam =
+    typeof rawOutfit === 'string'
+      ? (rawOutfit.length > 0 ? rawOutfit : null)
+      : Array.isArray(rawOutfit)
+        ? ((rawOutfit as string[]).find((x: string) => x.length > 0) ?? null)
+        : null;
 
   const picksQuery = useQuery({
-    queryKey: ['shop-picks'],
-    queryFn: () => api.shopPicks({}),
+    queryKey: ['shop-picks', outfitParam ?? null],
+    queryFn: () => api.shopPicks(outfitParam ? { outfitId: outfitParam } : {}),
     staleTime: 1000 * 60 * 30,
   });
 
@@ -57,10 +68,12 @@ export default function ShopScreen() {
 
   // Wishlist persists server-side (insert/delete on the owner `wishlist`
   // table) and fires `wishlist_added` — never local-only (P1-3).
+  // Optimistic mirror with revert + boxed error on server failure.
   const toggleWish = useCallback(
     (item: ProductPick) => {
       const id = item.productId;
       const adding = !wishlist.has(id);
+      setWishError(null);
       setWishlist((s) => {
         const next = new Set(s);
         if (adding) next.add(id);
@@ -68,6 +81,15 @@ export default function ShopScreen() {
         return next;
       });
       if (!userId) return;
+      const revert = () => {
+        setWishlist((s) => {
+          const next = new Set(s);
+          if (adding) next.delete(id);
+          else next.add(id);
+          return next;
+        });
+        setWishError('Could not save your wishlist. Check your connection and try again.');
+      };
       if (adding) {
         track('wishlist_added', {
           user_id: userId,
@@ -85,20 +107,18 @@ export default function ShopScreen() {
             price: item.price,
             affiliate_url: item.affiliateUrl,
           })
-          .then(
-            () => undefined,
-            () => undefined,
-          );
+          .then(({ error }) => {
+            if (error) revert();
+          });
       } else {
         void supabase
           .from('wishlist')
           .delete()
           .eq('user_id', userId)
           .eq('product_id', id)
-          .then(
-            () => undefined,
-            () => undefined,
-          );
+          .then(({ error }) => {
+            if (error) revert();
+          });
       }
     },
     [wishlist, userId, tier],
@@ -148,6 +168,14 @@ export default function ShopScreen() {
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]} testID="shop-screen">
       <Text style={[styles.header, { color: colors.text }]}>Shop the look</Text>
+      {!!wishError && (
+        <View
+          style={[styles.errorBox, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          testID="shop-wishlist-error"
+        >
+          <Text style={[styles.error, { color: colors.danger }]}>{wishError}</Text>
+        </View>
+      )}
 
       {picksQuery.isPending ? (
         <View style={styles.state} testID="shop-loading">
@@ -219,6 +247,8 @@ const styles = StyleSheet.create({
   price: { fontSize: 17, fontWeight: '700', fontFamily: 'Georgia' },
   heart: { fontSize: 24 },
   disclosure: { fontSize: 12, textAlign: 'center', marginTop: 16, paddingHorizontal: 24 },
+  error: { fontSize: 13, lineHeight: 18 },
+  errorBox: { borderWidth: 1, borderRadius: 12, padding: 12, marginTop: 8, marginBottom: 8 },
   state: { alignItems: 'center', paddingVertical: 48, gap: 8 },
   stateTitle: { fontSize: 18, fontWeight: '600' },
   stateText: { fontSize: 14, textAlign: 'center', paddingHorizontal: 24 },

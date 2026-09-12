@@ -31,7 +31,7 @@ export const ShareCard = memo(function ShareCard({
 }: ShareCardProps): React.JSX.Element {
   return (
     <View
-      testID={testID}
+      testID={testID ?? 'share-card'}
       accessible
       accessibilityLabel={`Style DNA: ${teaser}. Labels: ${labels.join(', ')}. Season ${colorSeason}`}
       className="gap-y-md rounded-xl border border-lineOnCard bg-card p-lg shadow-card"

@@ -102,17 +102,21 @@ export default function ClosetMin3() {
       );
       return;
     }
-    const perm = await ImagePicker.requestCameraPermissionsAsync();
-    if (!perm.granted) {
-      setError('Camera access is needed to photograph garments.');
-      return;
+    try {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) {
+        setError('Camera access is needed to photograph garments.');
+        return;
+      }
+      const shot = await ImagePicker.launchCameraAsync({
+        quality: 0.9,
+        allowsEditing: false,
+      });
+      if (shot.canceled || !shot.assets[0]?.uri) return;
+      await processUri(shot.assets[0].uri, 'camera');
+    } catch {
+      setError('Could not open the camera. Please try again.');
     }
-    const shot = await ImagePicker.launchCameraAsync({
-      quality: 0.9,
-      allowsEditing: false,
-    });
-    if (shot.canceled || !shot.assets[0]?.uri) return;
-    await processUri(shot.assets[0].uri, 'camera');
   }, [processUri]);
 
   // Photo-library path: same compress → upload → auto-tag pipeline as camera.
@@ -125,19 +129,23 @@ export default function ClosetMin3() {
       );
       return;
     }
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      setError('Photo-library access is needed to pick garment photos.');
-      return;
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        setError('Photo-library access is needed to pick garment photos.');
+        return;
+      }
+      const picked = await ImagePicker.launchImageLibraryAsync({
+        quality: 0.9,
+        allowsEditing: false,
+        allowsMultipleSelection: false,
+        mediaTypes: ['images'],
+      });
+      if (picked.canceled || !picked.assets[0]?.uri) return;
+      await processUri(picked.assets[0].uri, 'camera');
+    } catch {
+      setError('Could not open your photo library. Please try again.');
     }
-    const picked = await ImagePicker.launchImageLibraryAsync({
-      quality: 0.9,
-      allowsEditing: false,
-      allowsMultipleSelection: false,
-      mediaTypes: ['images'],
-    });
-    if (picked.canceled || !picked.assets[0]?.uri) return;
-    await processUri(picked.assets[0].uri, 'camera');
   }, [processUri]);
 
   const goFirstOutfit = useCallback(() => {

@@ -1,9 +1,10 @@
 import React, { memo, useCallback, useRef } from 'react';
-import { FlatList, Pressable, Text, View, type ViewToken } from 'react-native';
+import { FlatList, Text, View, type ViewToken } from 'react-native';
 import { Image } from 'expo-image';
 import { hapticFor } from '../lib/haptics';
 import { EmptyState } from './EmptyState';
 import { ErrorView } from './ErrorView';
+import { PressScale } from './PressScale';
 import { SkeletonGrid } from './Skeleton';
 
 export type PinItem = {
@@ -41,7 +42,7 @@ type CellProps = {
 const PinCell = memo(function PinCell({ item, selected, onSelect }: CellProps): React.JSX.Element {
   const label = `${item.title ?? 'Pinterest pin'}${item.poseMarked ? ', pose marked' : ''}${selected ? ', selected' : ''}`;
   return (
-    <Pressable
+    <PressScale
       testID={`pin-cell-${item.id}`}
       accessibilityRole="button"
       accessibilityLabel={label}
@@ -90,7 +91,7 @@ const PinCell = memo(function PinCell({ item, selected, onSelect }: CellProps): 
           <Text className="text-[13px] leading-[16px] font-bold text-white">✓</Text>
         </View>
       ) : null}
-    </Pressable>
+    </PressScale>
   );
 });
 

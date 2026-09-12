@@ -1,7 +1,10 @@
 import React, { memo, useCallback, useRef, useState } from 'react';
-import { Animated, Easing, Pressable, Text, View } from 'react-native';
+import { Animated, Easing, Pressable, Text, View, ActivityIndicator } from 'react-native';
 import { Image } from 'expo-image';
 import { hapticFor } from '../lib/haptics';
+import { PressScale } from './PressScale';
+import { useReducedMotion } from '../lib/motion';
+import { reelFullProps, reelThumbProps } from '../lib/perf';
 import { ReelSkeleton } from './ReelSkeleton';
 
 export type ReelPose = 'front' | 'step' | 'detail';
@@ -60,12 +63,15 @@ function money(n: number): string {
 }
 
 const GarmentChip = memo(function GarmentChip({
+  id,
   index,
   thumb,
 }: {
+  id: string;
   index: number;
   thumb?: string;
 }): React.JSX.Element {
+  const reduceMotion = useReducedMotion();
   return (
     <View
       accessible
@@ -79,8 +85,8 @@ const GarmentChip = memo(function GarmentChip({
           <Image
             source={{ uri: thumb }}
             style={{ width: '100%', height: '100%' }}
-            contentFit="cover"
-            transition={150}
+            {...reelThumbProps(id)}
+            transition={reduceMotion ? 0 : 150}
             accessibilityLabel={`Piece ${index + 1} thumbnail`}
           />
         ) : (
@@ -116,12 +122,13 @@ const ReelAction = memo(function ReelAction({
   }, [active, onPress]);
   if (!onPress) return null;
   return (
-    <Pressable
+    <PressScale
       testID={testID}
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityHint={hint}
       accessibilityState={{ selected: active }}
+      hitSlop={8}
       onPress={press}
       className={`flex-1 items-center rounded-lg border py-sm active:bg-paperDeep ${
         active ? 'border-sage bg-sageWash' : 'border-line bg-card'
@@ -134,7 +141,7 @@ const ReelAction = memo(function ReelAction({
       <Text className={`text-[11px] leading-[14px] font-semibold ${active ? 'text-sageDeep' : 'text-inkSoft'}`}>
         {label}
       </Text>
-    </Pressable>
+    </PressScale>
   );
 });
 
@@ -172,8 +179,12 @@ export const ReelCard = memo(function ReelCard({
   const burstScale = useRef(new Animated.Value(0)).current;
   const burstOpacity = useRef(new Animated.Value(0)).current;
   const [burstOn, setBurstOn] = useState(false);
+  const reduceMotion = useReducedMotion();
 
   const fireBurst = useCallback(() => {
+    // Reduced motion: the save still lands (heart state flips via `saved`);
+    // only the decorative burst is skipped — final state renders instantly.
+    if (reduceMotion) return;
     setBurstOn(true);
     burstScale.setValue(0.4);
     burstOpacity.setValue(1);
@@ -186,7 +197,7 @@ export const ReelCard = memo(function ReelCard({
     ]).start(({ finished }) => {
       if (finished) setBurstOn(false);
     });
-  }, [burstOpacity, burstScale]);
+  }, [burstOpacity, burstScale, reduceMotion]);
 
   const handleSave = useCallback(() => {
     void hapticFor.done();
@@ -228,22 +239,30 @@ export const ReelCard = memo(function ReelCard({
         <Text className="text-center text-[15px] leading-[22px] text-inkSoft">{error}</Text>
         {retry ? (
           <View className="mt-sm w-full">
-            <Pressable
+            <PressScale
               testID="reel-retry"
               accessibilityRole="button"
               accessibilityLabel="Retry this look, free of charge"
-              accessibilityState={{ busy: retrying }}
+              accessibilityState={{ disabled: retrying, busy: retrying }}
               disabled={retrying}
+              hitSlop={12}
               onPress={() => {
                 void hapticFor.select();
                 retry();
               }}
-              className={`items-center rounded-lg bg-terracotta py-md active:bg-terracottaDeep ${
+              className={`items-center justify-center rounded-lg bg-terracotta py-md active:bg-terracottaDeep ${
                 retrying ? 'opacity-50' : ''
               }`}
             >
-              <Text className="text-[15px] font-bold text-white">{retrying ? 'Retrying…' : 'Retry (free)'}</Text>
-            </Pressable>
+              <View className="items-center justify-center">
+                <Text className={`text-[15px] font-bold text-white ${retrying ? 'opacity-0' : ''}`}>Retry (free)</Text>
+                {retrying ? (
+                  <View className="absolute inset-0 items-center justify-center">
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  </View>
+                ) : null}
+              </View>
+            </PressScale>
           </View>
         ) : null}
       </View>
@@ -275,8 +294,8 @@ export const ReelCard = memo(function ReelCard({
         <Image
           source={{ uri: card.imageUrl }}
           style={{ width: '100%', height: '100%' }}
-          contentFit="cover"
-          transition={200}
+          {...reelFullProps(card.id)}
+          transition={reduceMotion ? 0 : 200}
           accessibilityLabel={`AI styled ${poseLabel} photo`}
         />
       </Pressable>
@@ -298,11 +317,12 @@ export const ReelCard = memo(function ReelCard({
         <View className="flex-1" />
         {qLeft != null && qCap != null ? (
           onUpgrade ? (
-            <Pressable
+            <PressScale
               testID="reel-quota"
               accessibilityRole="button"
               accessibilityLabel={`${qLeft} of ${qCap} renders left. See upgrade options.`}
               accessibilityHint="Opens the Premium paywall"
+              hitSlop={12}
               onPress={() => {
                 void hapticFor.select();
                 onUpgrade();
@@ -310,7 +330,7 @@ export const ReelCard = memo(function ReelCard({
               className="rounded-pill bg-white/95 px-sm py-[4px] active:opacity-80"
             >
               <Text className="text-[12px] leading-[16px] font-bold text-ink">{`${qLeft} of ${qCap} left`}</Text>
-            </Pressable>
+            </PressScale>
           ) : (
             <View accessible accessibilityRole="text" accessibilityLabel={`${qLeft} of ${qCap} renders left`} className="rounded-pill bg-white/95 px-sm py-[4px]">
               <Text className="text-[12px] leading-[16px] font-bold text-ink">{`${qLeft} of ${qCap} left`}</Text>
@@ -352,7 +372,7 @@ export const ReelCard = memo(function ReelCard({
           </View>
           <View className="mb-sm flex-row flex-wrap" style={{ columnGap: 6, rowGap: 6 }}>
             {visibleIds.map((id, i) => (
-              <GarmentChip key={id} index={i} thumb={garmentThumbs?.[id]} />
+              <GarmentChip key={id} id={id} index={i} thumb={garmentThumbs?.[id]} />
             ))}
             {overflow > 0 ? (
               <View accessible accessibilityLabel={`${overflow} more pieces`} className="rounded-pill bg-paperDeep px-sm py-[6px]">
@@ -367,11 +387,12 @@ export const ReelCard = memo(function ReelCard({
             {REEL_DISCLOSURE}
           </Text>
           {onWear ? (
-            <Pressable
+            <PressScale
               testID="reel-wear"
               accessibilityRole="button"
               accessibilityLabel="Wear this outfit today"
               accessibilityHint="Logs this look as today's outfit"
+              hitSlop={12}
               onPress={() => {
                 void hapticFor.confirm();
                 onWear();
@@ -379,7 +400,7 @@ export const ReelCard = memo(function ReelCard({
               className="mb-sm items-center rounded-lg bg-terracotta py-md active:bg-terracottaDeep"
             >
               <Text className="text-[16px] leading-[24px] font-bold text-white">Wear it today</Text>
-            </Pressable>
+            </PressScale>
           ) : null}
           {hasSecondary ? (
             <View className="flex-row" style={{ columnGap: 8 }}>

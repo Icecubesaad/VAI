@@ -1,6 +1,7 @@
 import React, { memo } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { hapticFor } from '../lib/haptics';
+import { PressScale } from './PressScale';
 
 export type InspirationRowProps = {
   /** Pinterest taste linked. False renders the one-tap connect state. */
@@ -57,18 +58,19 @@ export const InspirationRow = memo(function InspirationRow({
 
   return (
     <View testID={testID} className="rounded-xl border border-line bg-card px-md py-md">
-      <Pressable
+      <PressScale
         testID={testID ? `${testID}-row` : 'inspiration-row'}
         accessibilityRole="button"
         accessibilityLabel={rowLabel}
         accessibilityHint={connected ? 'Manage style inspiration boards' : 'Connect Pinterest'}
         accessibilityState={{ disabled: locked, busy: syncing }}
         disabled={locked}
+        hitSlop={8}
         onPress={() => {
           void hapticFor.select();
           onPress();
         }}
-        className="flex-row items-center active:opacity-80"
+        className={`flex-row items-center active:opacity-80 ${locked ? 'opacity-50' : ''}`}
         style={{ columnGap: 12 }}
       >
         <View
@@ -104,25 +106,26 @@ export const InspirationRow = memo(function InspirationRow({
         <Text className="text-[20px] leading-[24px] text-muted" aria-hidden>
           ›
         </Text>
-      </Pressable>
+      </PressScale>
       {connected && onDisconnect ? (
-        <Pressable
+        <PressScale
           testID={testID ? `${testID}-disconnect` : 'inspiration-disconnect'}
           accessibilityRole="button"
           accessibilityLabel={disconnecting ? 'Disconnecting style inspiration' : 'Disconnect style inspiration'}
           accessibilityHint="Removes synced taste data. Your closet and renders stay."
           accessibilityState={{ disabled: disconnecting, busy: disconnecting }}
           disabled={disconnecting}
+          hitSlop={12}
           onPress={() => {
             void hapticFor.select();
             onDisconnect();
           }}
-          className="mt-sm border-t border-lineOnCard pt-sm active:opacity-70"
+          className={`mt-sm border-t border-lineOnCard pt-sm active:opacity-70 ${disconnecting ? 'opacity-50' : ''}`}
         >
           <Text className="text-[14px] leading-[20px] font-semibold text-danger">
             {disconnecting ? 'Disconnecting…' : 'Disconnect'}
           </Text>
-        </Pressable>
+        </PressScale>
       ) : null}
     </View>
   );

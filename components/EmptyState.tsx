@@ -8,6 +8,9 @@ export type EmptyStateProps = {
   body: string;
   actionTitle?: string;
   onAction?: () => void;
+  /** Forwards to the action Button — spinner overlays, no layout shift. */
+  actionLoading?: boolean;
+  actionDisabled?: boolean;
   /** Single-letter / emoji-free glyph drawn large — keeps zero asset cost */
   glyph?: string;
   /**
@@ -25,6 +28,8 @@ export const EmptyState = memo(function EmptyState({
   body,
   actionTitle,
   onAction,
+  actionLoading = false,
+  actionDisabled = false,
   glyph = '✦',
   variant = 'default',
   testID,
@@ -49,7 +54,13 @@ export const EmptyState = memo(function EmptyState({
       <Text className="text-center text-[15px] leading-[22px] text-inkSoft">{body}</Text>
       {actionTitle && onAction ? (
         <View className="mt-sm w-full">
-          <Button title={actionTitle} onPress={onAction} />
+          <Button
+            title={actionTitle}
+            onPress={onAction}
+            loading={actionLoading}
+            disabled={actionDisabled}
+            testID={testID ? `${testID}-cta` : 'empty-state-cta'}
+          />
         </View>
       ) : null}
     </View>

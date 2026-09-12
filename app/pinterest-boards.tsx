@@ -212,7 +212,14 @@ export default function PinterestBoards() {
 
       <View style={styles.foot}>
         {done ? (
-          <Button title="Done" onPress={() => router.back()} testID="boards-done-button" />
+          <Button
+            title="Done"
+            onPress={() => {
+              if (router.canGoBack()) router.back();
+              else router.replace('/(tabs)/profile');
+            }}
+            testID="boards-done-button"
+          />
         ) : (
           <Button
             title={syncing ? 'Syncing…' : `Sync ${selectedIds.length} board${selectedIds.length === 1 ? '' : 's'}`}

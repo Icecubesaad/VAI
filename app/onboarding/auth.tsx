@@ -14,7 +14,6 @@ import * as AppleAuthentication from 'expo-apple-authentication';
 import * as WebBrowser from 'expo-web-browser';
 import { makeRedirectUri } from 'expo-auth-session';
 import { useTheme } from '@/theme';
-import { Button } from '@/components/Button';
 import { supabase } from '@/lib/supabase';
 import { apiErrorCopy } from '@/lib/api';
 import { ageBandForBirthYear, currentYear, useSession, type AgeBand } from '@/store/session';

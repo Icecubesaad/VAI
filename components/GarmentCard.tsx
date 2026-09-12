@@ -1,7 +1,8 @@
 import React, { memo } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import { Badge } from './Badge';
+import { PressScale } from './PressScale';
 
 export type Garment = {
   id: string;
@@ -22,6 +23,7 @@ export type GarmentCardProps = {
   garment: Garment;
   onPress?: (id: string) => void;
   selected?: boolean;
+  disabled?: boolean;
   /** CONTRACT-frontend closet shape: renders a ✕ affordance calling back. */
   onDelete?: () => void;
   testID?: string;
@@ -41,6 +43,7 @@ export const GarmentCard = memo(function GarmentCard({
   garment,
   onPress,
   selected = false,
+  disabled = false,
   onDelete,
   testID,
 }: GarmentCardProps): React.JSX.Element {
@@ -51,15 +54,16 @@ export const GarmentCard = memo(function GarmentCard({
   }`;
 
   return (
-    <Pressable
-      testID={testID}
+    <PressScale
+      testID={testID ?? 'garment-card'}
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityState={{ selected }}
+      accessibilityState={{ selected, disabled }}
+      disabled={disabled}
       onPress={onPress ? () => onPress(garment.id) : undefined}
       className={`overflow-hidden rounded-lg border bg-card active:opacity-90 ${
         selected ? 'border-terracotta' : 'border-lineOnCard'
-      }`}
+      } ${disabled ? 'opacity-50' : ''}`}
     >
       <View className="aspect-[3/4] w-full bg-paperDeep">
         {photo ? (
@@ -91,18 +95,20 @@ export const GarmentCard = memo(function GarmentCard({
         </View>
       </View>
       {onDelete ? (
-        <Pressable
+        <PressScale
           testID={testID ? `${testID}-delete` : 'garment-delete'}
           accessibilityRole="button"
           accessibilityLabel={`Remove ${garment.category}`}
+          accessibilityHint="Removes this item from your closet"
+          hitSlop={12}
           onPress={onDelete}
           className="absolute right-sm top-sm items-center justify-center rounded-pill bg-black/55 px-sm py-[4px] active:opacity-70"
         >
           <Text className="text-[12px] leading-[16px] font-bold text-white" aria-hidden>
             ✕
           </Text>
-        </Pressable>
+        </PressScale>
       ) : null}
-    </Pressable>
+    </PressScale>
   );
 });

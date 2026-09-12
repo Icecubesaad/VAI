@@ -3,6 +3,7 @@ import { Animated, Linking, Modal, Pressable, ScrollView, Text, View } from 'rea
 import { Image } from 'expo-image';
 import { hapticFor } from '../lib/haptics';
 import { Button } from './Button';
+import { PressScale } from './PressScale';
 
 export type ShareBackBoard = {
   id: string;
@@ -65,10 +66,12 @@ export const ShareBackSheet = memo(function ShareBackSheet({
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-      <View testID={testID} className="flex-1 justify-end bg-scrim">
+      <View testID={testID ?? 'share-back-sheet'} className="flex-1 justify-end bg-scrim">
         <Pressable
+          testID={testID ? `${testID}-dismiss-cta` : 'share-dismiss-cta'}
           accessibilityRole="button"
           accessibilityLabel="Dismiss share sheet"
+          disabled={posting}
           onPress={onClose}
           className="absolute inset-0"
         />
@@ -124,12 +127,14 @@ export const ShareBackSheet = memo(function ShareBackSheet({
                 {boards.map((b) => {
                   const isSelected = b.id === selectedBoardId;
                   return (
-                    <Pressable
+                    <PressScale
                       key={b.id}
                       testID={testID ? `${testID}-board-${b.id}` : `share-board-${b.id}`}
                       accessibilityRole="radio"
-                      accessibilityState={{ selected: isSelected }}
+                      accessibilityState={{ selected: isSelected, disabled: posting }}
                       accessibilityLabel={`${b.name}${b.secret ? ', secret board' : ''}${isSelected ? ', selected' : ''}`}
+                      disabled={posting}
+                      hitSlop={8}
                       onPress={() => {
                         if (!isSelected) {
                           void hapticFor.select();
@@ -138,7 +143,7 @@ export const ShareBackSheet = memo(function ShareBackSheet({
                       }}
                       className={`flex-row items-center rounded-lg border-2 bg-card p-sm active:opacity-90 ${
                         isSelected ? 'border-terracotta' : 'border-line'
-                      }`}
+                      } ${posting ? 'opacity-50' : ''}`}
                       style={{ columnGap: 12 }}
                     >
                       <View className="h-[44px] w-[44px] overflow-hidden rounded-md bg-paperDeep">
@@ -174,7 +179,7 @@ export const ShareBackSheet = memo(function ShareBackSheet({
                       >
                         {isSelected ? <Text className="text-[12px] font-bold text-white">✓</Text> : null}
                       </View>
-                    </Pressable>
+                    </PressScale>
                   );
                 })}
               </View>

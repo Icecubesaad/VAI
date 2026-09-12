@@ -1,7 +1,8 @@
 import React, { memo, useEffect, useRef, useState } from 'react';
-import { Animated, Pressable, Text, View } from 'react-native';
+import { Animated, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import { hapticFor } from '../lib/haptics';
+import { PressScale } from './PressScale';
 
 export type PoseToggleMode = 'mine' | 'pin';
 
@@ -10,6 +11,7 @@ export type PoseToggleProps = {
   onChange: (mode: PoseToggleMode) => void;
   /** Pin thumb shown as the Pin-pose dot preview; glyph fallback when absent. */
   pinThumb?: string | null;
+  disabled?: boolean;
   testID?: string;
 };
 
@@ -30,6 +32,7 @@ export const PoseToggle = memo(function PoseToggle({
   mode,
   onChange,
   pinThumb,
+  disabled = false,
   testID,
 }: PoseToggleProps): React.JSX.Element {
   const [width, setWidth] = useState(0);
@@ -54,8 +57,9 @@ export const PoseToggle = memo(function PoseToggle({
       accessibilityRole="radiogroup"
       accessibilityLabel="Pose source"
       accessibilityValue={{ text: LABEL[mode] }}
+      accessibilityState={{ disabled }}
       onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
-      className="relative flex-row rounded-pill border border-line bg-paperDeep p-[4px]"
+      className={`relative flex-row rounded-pill border border-line bg-paperDeep p-[4px] ${disabled ? 'opacity-50' : ''}`}
     >
       {thumbWidth > 0 ? (
         <Animated.View
@@ -67,13 +71,15 @@ export const PoseToggle = memo(function PoseToggle({
       {MODES.map((m) => {
         const selected = m === mode;
         return (
-          <Pressable
+          <PressScale
             key={m}
             testID={testID ? `${testID}-${m}` : `pose-toggle-${m}`}
             accessibilityRole="radio"
-            accessibilityState={{ selected }}
+            accessibilityState={{ selected, disabled }}
             accessibilityLabel={`${LABEL[m]}${selected ? ', selected' : ''}`}
             accessibilityHint={m === 'mine' ? 'Style with your own pose' : 'Style with the Pinterest pin pose'}
+            disabled={disabled}
+            hitSlop={8}
             onPress={() => {
               if (!selected) {
                 void hapticFor.select();
@@ -105,7 +111,7 @@ export const PoseToggle = memo(function PoseToggle({
             <Text className={`text-[14px] leading-[20px] font-semibold ${selected ? 'text-ink' : 'text-muted'}`}>
               {LABEL[m]}
             </Text>
-          </Pressable>
+          </PressScale>
         );
       })}
     </View>

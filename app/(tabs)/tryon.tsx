@@ -5,11 +5,13 @@ import {
   Linking,
   Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Image } from 'expo-image';
 import * as Crypto from 'expo-crypto';
@@ -19,7 +21,6 @@ import {
   ApiError,
   api,
   apiErrorCopy,
-  type Garment,
   type RenderJob,
   type RenderMode,
   type RenderTier,
@@ -179,14 +180,6 @@ export default function TryOnScreen() {
   const poseMode: PoseMode = posePreference === 'auto' && freshPosePin ? 'adapt' : 'keep';
   const poseRefId = poseMode === 'adapt' ? (freshPosePin?.id ?? null) : null;
   const styledWithTaste = poseMode === 'adapt';
-
-  const selectedGarments: Garment[] = useMemo(
-    () =>
-      selected
-        .map((id) => garments.find((g) => g.id === id))
-        .filter((g): g is Garment => g !== undefined),
-    [selected, garments],
-  );
 
   const rendersLeft = tier === 'free' ? rendersLeftFree : Math.max(0, monthlyCap - monthlyUsed);
   const cap = tier === 'free' ? 5 : monthlyCap;
@@ -667,7 +660,18 @@ export default function TryOnScreen() {
       {/* Share-back: board picker → explicit confirm → pinterest-share. */}
       <Modal visible={shareOpen} transparent animationType="slide" onRequestClose={() => setShareOpen(false)}>
         <View style={styles.scrim}>
-          <View style={[styles.sheet, { backgroundColor: colors.surface }]} testID="share-sheet">
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => setShareOpen(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss share sheet"
+            testID="share-backdrop"
+          />
+          <SafeAreaView
+            edges={['bottom']}
+            style={[styles.sheet, { backgroundColor: colors.surface }]}
+            testID="share-sheet"
+          >
             <Text style={[styles.sheetTitle, { color: colors.text }]}>Save to Pinterest</Text>
             {tasteBoards.length === 0 ? (
               <View style={styles.sheetBody}>
@@ -707,26 +711,28 @@ export default function TryOnScreen() {
               </View>
             ) : (
               <View style={styles.sheetBody}>
-                {tasteBoards.map((b) => {
-                  const active = b.boardId === shareBoardId;
-                  return (
-                    <Pressable
-                      key={b.boardId}
-                      style={[
-                        styles.boardRow,
-                        { borderColor: colors.border },
-                        active && { borderColor: colors.primary },
-                      ]}
-                      onPress={() => setShareBoardId(b.boardId)}
-                      testID={`share-board-${b.boardId}`}
-                    >
-                      <Text style={[styles.boardName, { color: colors.text }]} numberOfLines={1}>
-                        {b.name}
-                      </Text>
-                      {active && <Text style={[styles.tickSm, { color: colors.primary }]}>✓</Text>}
-                    </Pressable>
-                  );
-                })}
+                <ScrollView style={styles.boardScroll} showsVerticalScrollIndicator={false}>
+                  {tasteBoards.map((b) => {
+                    const active = b.boardId === shareBoardId;
+                    return (
+                      <Pressable
+                        key={b.boardId}
+                        style={[
+                          styles.boardRow,
+                          { borderColor: colors.border },
+                          active && { borderColor: colors.primary },
+                        ]}
+                        onPress={() => setShareBoardId(b.boardId)}
+                        testID={`share-board-${b.boardId}`}
+                      >
+                        <Text style={[styles.boardName, { color: colors.text }]} numberOfLines={1}>
+                          {b.name}
+                        </Text>
+                        {active && <Text style={[styles.tickSm, { color: colors.primary }]}>✓</Text>}
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
                 {!!shareError && (
                   <Text style={[styles.error, { color: colors.danger }]} testID="share-error">
                     {shareError}
@@ -758,7 +764,7 @@ export default function TryOnScreen() {
                 </Pressable>
               </View>
             )}
-          </View>
+          </SafeAreaView>
         </View>
       </Modal>
     </View>
@@ -815,6 +821,7 @@ const styles = StyleSheet.create({
   sheetTitle: { fontSize: 18, fontWeight: '700' },
   sheetSub: { fontSize: 14, lineHeight: 20 },
   sheetBody: { gap: 10 },
+  boardScroll: { maxHeight: 280 },
   pinGrid: { gap: 8 },
   pinCell: { width: 100, height: 140, borderRadius: 10, backgroundColor: '#EDE8E0' },
   boardRow: {

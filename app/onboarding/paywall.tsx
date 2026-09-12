@@ -34,6 +34,7 @@ export default function PaywallScreen() {
   const rendersLeft = usePaywall((s) => s.rendersLeft);
   const fetchStatus = usePaywall((s) => s.fetchStatus);
   const fetching = usePaywall((s) => s.fetching);
+  const fetchError = usePaywall((s) => s.fetchError);
   const purchasing = usePaywall((s) => s.purchasing);
   const purchaseError = usePaywall((s) => s.purchaseError);
   const startTrial = usePaywall((s) => s.startTrial);
@@ -134,6 +135,11 @@ export default function PaywallScreen() {
       {!!purchaseError && (
         <Text style={[styles.error, { color: colors.danger }]} testID="paywall-error">
           {purchaseError}
+        </Text>
+      )}
+      {!!fetchError && !fetching && !purchaseError && (
+        <Text style={[styles.error, { color: colors.danger }]} testID="paywall-status-error">
+          {fetchError}
         </Text>
       )}
 

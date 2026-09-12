@@ -1,5 +1,5 @@
 import React, { memo } from 'react';
-import { Text, ActivityIndicator, type PressableProps } from 'react-native';
+import { Text, ActivityIndicator, View, type PressableProps } from 'react-native';
 import { hapticFor } from '../lib/haptics';
 import { MOTION } from '../lib/motion';
 import { PressScale } from './PressScale';
@@ -76,6 +76,7 @@ export const Button = memo(function Button({
       accessibilityHint={accessibilityHint}
       accessibilityState={{ disabled: isDisabled, busy: loading }}
       disabled={isDisabled}
+      hitSlop={12}
       onPress={() => {
         if (haptic === 'confirm') void hapticFor.confirm();
         else if (haptic === 'select') void hapticFor.select();
@@ -85,11 +86,16 @@ export const Button = memo(function Button({
         isDisabled ? 'opacity-50' : ''
       }`}
     >
-      {loading ? (
-        <ActivityIndicator size="small" color={variant === 'secondary' || variant === 'ghost' || variant === 'dev' ? '#1A1A1A' : '#FFFFFF'} />
-      ) : (
-        <Text className={`${s.text} ${textCls[variant]}`}>{title}</Text>
-      )}
+      {/* Loading overlays the spinner on invisible title text so the
+          button keeps its exact measured size (no layout shift). */}
+      <View className="items-center justify-center">
+        <Text className={`${s.text} ${textCls[variant]} ${loading ? 'opacity-0' : ''}`}>{title}</Text>
+        {loading ? (
+          <View className="absolute inset-0 items-center justify-center">
+            <ActivityIndicator size="small" color={variant === 'secondary' || variant === 'ghost' || variant === 'dev' ? '#1A1A1A' : '#FFFFFF'} />
+          </View>
+        ) : null}
+      </View>
     </PressScale>
   );
 });
@@ -128,6 +134,7 @@ export const PremiumCTA = memo(function PremiumCTA({
       accessibilityLabel={accessibilityLabel ?? `${title}${subtitle ? `, ${subtitle}` : ''}`}
       accessibilityState={{ disabled: isDisabled, busy: loading }}
       disabled={isDisabled}
+      hitSlop={12}
       onPress={() => {
         void hapticFor.confirm();
         onPress();
@@ -141,14 +148,19 @@ export const PremiumCTA = memo(function PremiumCTA({
       <Text className="text-[11px] font-bold uppercase text-white/70" style={{ letterSpacing: 1.5 }} aria-hidden>
         VAI
       </Text>
-      {loading ? (
-        <ActivityIndicator size="small" color="#FFFFFF" />
-      ) : (
-        <Text className="text-[17px] leading-[24px] font-bold text-white">
+      {/* Loading keeps the title measured (invisible) with the spinner
+          overlaid absolute — no width/height shift at the money moment. */}
+      <View className="items-center justify-center">
+        <Text className={`text-[17px] leading-[24px] font-bold text-white ${loading ? 'opacity-0' : ''}`}>
           {title}
           {subtitle ? <Text className="font-medium text-white/80"> · {subtitle}</Text> : null}
         </Text>
-      )}
+        {loading ? (
+          <View className="absolute inset-0 items-center justify-center">
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          </View>
+        ) : null}
+      </View>
     </PressScale>
   );
 });

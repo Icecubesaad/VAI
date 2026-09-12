@@ -1,6 +1,7 @@
 import React, { memo } from 'react';
-import { Linking, Pressable, Text, View } from 'react-native';
+import { Linking, Text, View } from 'react-native';
 import { Card } from './Card';
+import { PressScale } from './PressScale';
 
 export type PinterestConsentProps = {
   /** When true, adds the secret-boards opt-in line. */
@@ -68,14 +69,16 @@ export const PinterestConsent = memo(function PinterestConsent({
             VAI never auto-posts. Every share to Pinterest is a deliberate tap by you.
           </Text>
         </View>
-        <Pressable
+        <PressScale
+          testID={testID ? `${testID}-privacy-cta` : 'pinterest-privacy-cta'}
           accessibilityRole="link"
           accessibilityLabel="Pinterest data and privacy details"
+          hitSlop={12}
           onPress={() => void Linking.openURL('https://vai.style/privacy')}
           className="py-[2px] active:opacity-70"
         >
           <Text className="text-[14px] font-semibold text-ink underline">How we handle Pinterest data</Text>
-        </Pressable>
+        </PressScale>
       </View>
     </Card>
   );

@@ -1,8 +1,9 @@
 import React, { memo } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import { Badge } from './Badge';
 import { Card } from './Card';
+import { PressScale } from './PressScale';
 
 export type OutfitCardProps = {
   imageUrl?: string | null;
@@ -16,6 +17,12 @@ export type OutfitCardProps = {
   onRestyle?: () => void;
   onSave?: () => void;
   saved?: boolean;
+  /** Disables all actions (blocks taps + dims to the shared disabled opacity). */
+  disabled?: boolean;
+  /** Per-action busy flags — spinner overlays invisible label, no layout shift. */
+  tryingOn?: boolean;
+  restyling?: boolean;
+  saving?: boolean;
   /** CONTRACT-frontend barrel shape: planner/first-outfit hero. */
   outfitId?: string;
   /** Owned-garment photo URLs; first becomes the hero media. */
@@ -44,6 +51,10 @@ export const OutfitCard = memo(function OutfitCard({
   onRestyle,
   onSave,
   saved = false,
+  disabled = false,
+  tryingOn = false,
+  restyling = false,
+  saving = false,
   outfitId,
   garmentImages,
   hero = false,
@@ -52,8 +63,12 @@ export const OutfitCard = memo(function OutfitCard({
   const resolvedImage = imageUrl ?? garmentImages?.[0] ?? null;
   const resolvedTitle = title ?? "Today's outfit";
   const extraImages = hero ? (garmentImages ?? []).slice(1, 4) : [];
+  const tryDisabled = disabled || tryingOn;
+  const restyleDisabled = disabled || restyling;
+  const saveDisabled = disabled || saving;
+  const cardTestID = testID ?? 'outfit-card';
   return (
-    <Card testID={testID} padded={false} accessible accessibilityLabel={`Outfit: ${resolvedTitle}`} className="overflow-hidden">
+    <Card testID={cardTestID} padded={false} accessible accessibilityLabel={`Outfit: ${resolvedTitle}`} className="overflow-hidden">
       <View className="aspect-[4/5] w-full bg-paperDeep">
         {resolvedImage ? (
           <Image
@@ -89,39 +104,75 @@ export const OutfitCard = memo(function OutfitCard({
         ) : null}
         <View className="mt-xs flex-row gap-x-sm">
           {onTryOn ? (
-            <Pressable
+            <PressScale
+              testID={testID ? `${testID}-tryon-cta` : 'outfit-tryon-cta'}
               accessibilityRole="button"
               accessibilityLabel={`Try on ${resolvedTitle}`}
+              accessibilityState={{ disabled: tryDisabled, busy: tryingOn }}
+              disabled={tryDisabled}
+              hitSlop={12}
               onPress={onTryOn}
-              className="flex-1 items-center rounded-lg bg-ink py-md active:opacity-80"
-            >
-              <Text className="text-[15px] font-bold text-white">Try on</Text>
-            </Pressable>
-          ) : null}
-          {onRestyle ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`Restyle ${resolvedTitle}`}
-              onPress={onRestyle}
-              className="flex-1 items-center rounded-lg border border-line bg-card py-md active:bg-paperDeep"
-            >
-              <Text className="text-[15px] font-semibold text-ink">Restyle</Text>
-            </Pressable>
-          ) : null}
-          {onSave ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={saved ? `Saved ${resolvedTitle}` : `Save ${resolvedTitle}`}
-              accessibilityState={{ selected: saved }}
-              onPress={onSave}
-              className={`items-center justify-center rounded-lg border px-lg active:bg-paperDeep ${
-                saved ? 'border-sage bg-sageWash' : 'border-line bg-card'
+              className={`flex-1 items-center justify-center rounded-lg bg-ink py-md active:opacity-80 ${
+                tryDisabled ? 'opacity-50' : ''
               }`}
             >
-              <Text className={`text-[15px] font-semibold ${saved ? 'text-sageDeep' : 'text-ink'}`}>
-                {saved ? '✓ Saved' : 'Save'}
-              </Text>
-            </Pressable>
+              <View className="items-center justify-center">
+                <Text className={`text-[15px] font-bold text-white ${tryingOn ? 'opacity-0' : ''}`}>Try on</Text>
+                {tryingOn ? (
+                  <View className="absolute inset-0 items-center justify-center">
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  </View>
+                ) : null}
+              </View>
+            </PressScale>
+          ) : null}
+          {onRestyle ? (
+            <PressScale
+              testID={testID ? `${testID}-restyle-cta` : 'outfit-restyle-cta'}
+              accessibilityRole="button"
+              accessibilityLabel={`Restyle ${resolvedTitle}`}
+              accessibilityState={{ disabled: restyleDisabled, busy: restyling }}
+              disabled={restyleDisabled}
+              hitSlop={12}
+              onPress={onRestyle}
+              className={`flex-1 items-center justify-center rounded-lg border border-line bg-card py-md active:bg-paperDeep ${
+                restyleDisabled ? 'opacity-50' : ''
+              }`}
+            >
+              <View className="items-center justify-center">
+                <Text className={`text-[15px] font-semibold text-ink ${restyling ? 'opacity-0' : ''}`}>Restyle</Text>
+                {restyling ? (
+                  <View className="absolute inset-0 items-center justify-center">
+                    <ActivityIndicator size="small" color="#1A1A1A" />
+                  </View>
+                ) : null}
+              </View>
+            </PressScale>
+          ) : null}
+          {onSave ? (
+            <PressScale
+              testID={testID ? `${testID}-save-cta` : 'outfit-save-cta'}
+              accessibilityRole="button"
+              accessibilityLabel={saved ? `Saved ${resolvedTitle}` : `Save ${resolvedTitle}`}
+              accessibilityState={{ selected: saved, disabled: saveDisabled, busy: saving }}
+              disabled={saveDisabled}
+              hitSlop={12}
+              onPress={onSave}
+              className={`items-center justify-center rounded-lg border px-lg py-md active:bg-paperDeep ${
+                saved ? 'border-sage bg-sageWash' : 'border-line bg-card'
+              } ${saveDisabled ? 'opacity-50' : ''}`}
+            >
+              <View className="items-center justify-center">
+                <Text className={`text-[15px] font-semibold ${saving ? 'opacity-0' : ''} ${saved ? 'text-sageDeep' : 'text-ink'}`}>
+                  {saved ? '✓ Saved' : 'Save'}
+                </Text>
+                {saving ? (
+                  <View className="absolute inset-0 items-center justify-center">
+                    <ActivityIndicator size="small" color="#1A1A1A" />
+                  </View>
+                ) : null}
+              </View>
+            </PressScale>
           ) : null}
         </View>
         {extraImages.length > 0 ? (

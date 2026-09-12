@@ -1,6 +1,7 @@
 import React, { memo } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { hapticFor } from '../lib/haptics';
+import { PressScale } from './PressScale';
 
 export type CounterBadgeProps = {
   /** Renders remaining, e.g. 3 of total 5 → "3 of 5 left". */
@@ -47,10 +48,12 @@ export const CounterBadge = memo(function CounterBadge({
       <Text className={`text-[13px] leading-[18px] font-semibold ${exhausted ? 'text-terracottaDeep' : 'text-inkSoft'}`}>
         {label}
       </Text>
-      <Pressable
+      <PressScale
+        testID={testID ? `${testID}-cta` : 'counter-cta'}
         accessibilityRole="button"
         accessibilityLabel={exhausted ? 'Upgrade to get more renders' : 'See upgrade options'}
         accessibilityHint="Opens the Premium paywall"
+        hitSlop={12}
         onPress={() => {
           void hapticFor.select();
           onUpgrade();
@@ -60,7 +63,7 @@ export const CounterBadge = memo(function CounterBadge({
         <Text className="text-[12px] leading-[16px] font-bold text-white">
           {exhausted ? 'Upgrade' : 'Get more'}
         </Text>
-      </Pressable>
+      </PressScale>
     </View>
   );
 });

@@ -9,8 +9,10 @@ import {
   Text,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { hapticFor } from '../lib/haptics';
 import { PremiumCTA } from './Button';
+import { PressScale } from './PressScale';
 
 export type PaywallPlan = 'monthly' | 'yearly';
 
@@ -52,25 +54,32 @@ const PlanCard = memo(function PlanCard({
   plan,
   selected,
   onSelect,
+  disabled = false,
+  testID,
 }: {
   plan: PaywallPlan;
   selected: boolean;
   onSelect: (p: PaywallPlan) => void;
+  disabled?: boolean;
+  testID?: string;
 }): React.JSX.Element {
   const meta = PLAN_META[plan];
   const isYearly = plan === 'yearly';
   return (
-    <Pressable
+    <PressScale
+      testID={testID ?? `paywall-plan-${plan}`}
       accessibilityRole="radio"
-      accessibilityState={{ selected }}
-      accessibilityLabel={`${meta.title}, ${meta.price}${isYearly ? ', best value' : ''}`}
+      accessibilityState={{ selected, disabled }}
+      accessibilityLabel={`${meta.title}, ${meta.price}${isYearly ? ', best value' : ''}${selected ? ', selected' : ''}`}
+      disabled={disabled}
+      hitSlop={8}
       onPress={() => {
         void hapticFor.select();
         onSelect(plan);
       }}
       className={`flex-1 rounded-lg border-2 p-md active:opacity-90 ${
         selected ? 'border-terracotta bg-terracottaWash/40' : 'border-line bg-card'
-      }`}
+      } ${disabled ? 'opacity-50' : ''}`}
     >
       <View className="flex-row items-center justify-between">
         <Text className={`text-[15px] font-bold ${selected ? 'text-terracottaDeep' : 'text-ink'}`}>
@@ -84,7 +93,7 @@ const PlanCard = memo(function PlanCard({
       </View>
       <Text className="mt-[2px] text-[17px] font-bold text-ink">{meta.price}</Text>
       <Text className="text-[12px] text-inkSoft">{meta.perMonth}</Text>
-    </Pressable>
+    </PressScale>
   );
 });
 
@@ -120,10 +129,12 @@ export const Sheet = memo(function Sheet({
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-      <View testID={testID} className="flex-1 justify-end bg-scrim">
+      <View testID={testID ?? 'paywall-sheet'} className="flex-1 justify-end bg-scrim">
         <Pressable
+          testID="paywall-dismiss-cta"
           accessibilityRole="button"
           accessibilityLabel="Dismiss paywall"
+          disabled={purchasing}
           onPress={onClose}
           className="absolute inset-0"
         />
@@ -135,6 +146,7 @@ export const Sheet = memo(function Sheet({
           accessibilityLabel="VAI Premium paywall"
         >
           <View className="mx-auto mb-sm h-[5px] w-[40px] rounded-pill bg-line" aria-hidden />
+          <SafeAreaView edges={['bottom']}>
           <ScrollView contentContainerClassName="gap-y-lg px-xl pb-md" showsVerticalScrollIndicator={false}>
             <View className="gap-y-[4px]">
               <Text className="font-display text-[30px] leading-[36px] font-semibold text-ink">VAI Premium</Text>
@@ -155,8 +167,8 @@ export const Sheet = memo(function Sheet({
             </View>
 
             <View className="flex-row gap-x-sm">
-              <PlanCard plan="monthly" selected={plan === 'monthly'} onSelect={handleSelect} />
-              <PlanCard plan="yearly" selected={plan === 'yearly'} onSelect={handleSelect} />
+              <PlanCard plan="monthly" selected={plan === 'monthly'} onSelect={handleSelect} disabled={purchasing} />
+              <PlanCard plan="yearly" selected={plan === 'yearly'} onSelect={handleSelect} disabled={purchasing} />
             </View>
 
             <View className="flex-row items-center justify-between rounded-lg border border-line bg-card px-md py-sm">
@@ -166,6 +178,7 @@ export const Sheet = memo(function Sheet({
               </View>
               <Switch
                 value={withTrial}
+                disabled={purchasing}
                 onValueChange={(v) => {
                   void hapticFor.select();
                   setWithTrial(v);
@@ -173,7 +186,7 @@ export const Sheet = memo(function Sheet({
                 trackColor={{ true: '#C65D3B', false: '#E7DED2' }}
                 accessibilityRole="switch"
                 accessibilityLabel="7-day free trial"
-                accessibilityState={{ checked: withTrial }}
+                accessibilityState={{ checked: withTrial, disabled: purchasing }}
               />
             </View>
 
@@ -189,42 +202,49 @@ export const Sheet = memo(function Sheet({
             </View>
 
             <View className="flex-row items-center justify-center gap-x-lg">
-              <Pressable
+              <PressScale
+                testID="paywall-restore-cta"
                 accessibilityRole="button"
                 accessibilityLabel="Restore purchases"
-                accessibilityState={{ busy: restoring }}
+                accessibilityState={{ disabled: restoring, busy: restoring }}
                 disabled={restoring}
+                hitSlop={12}
                 onPress={() => {
                   void hapticFor.select();
                   onRestore();
                 }}
-                className="py-sm active:opacity-70"
+                className={`py-sm active:opacity-70 ${restoring ? 'opacity-50' : ''}`}
               >
                 <Text className="text-[14px] font-semibold text-ink underline">
                   {restoring ? 'Restoring…' : 'Restore purchases'}
                 </Text>
-              </Pressable>
-              <Pressable
+              </PressScale>
+              <PressScale
+                testID="paywall-privacy-cta"
                 accessibilityRole="link"
                 accessibilityLabel="Privacy policy"
+                hitSlop={12}
                 onPress={() => void Linking.openURL('https://vai.style/privacy')}
                 className="py-sm active:opacity-70"
               >
                 <Text className="text-[14px] text-inkSoft underline">Privacy</Text>
-              </Pressable>
-              <Pressable
+              </PressScale>
+              <PressScale
+                testID="paywall-terms-cta"
                 accessibilityRole="link"
                 accessibilityLabel="Terms of service"
+                hitSlop={12}
                 onPress={() => void Linking.openURL('https://vai.style/terms')}
                 className="py-sm active:opacity-70"
               >
                 <Text className="text-[14px] text-inkSoft underline">Terms</Text>
-              </Pressable>
+              </PressScale>
             </View>
             <Text className="text-center text-[12px] leading-[16px] text-muted">
               Downgrading keeps everything — extra items become read-only until you upgrade.
             </Text>
           </ScrollView>
+          </SafeAreaView>
         </Animated.View>
       </View>
     </Modal>

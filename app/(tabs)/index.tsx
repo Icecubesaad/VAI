@@ -70,6 +70,7 @@ export default function PlannerHome() {  const router = useRouter();
 
   const onRefresh = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ['plan-day', today] });
+    void queryClient.invalidateQueries({ queryKey: ['pose-status'] });
   }, [queryClient, today]);
 
   const outfit: PlannedOutfit | undefined = outfitQuery.data;
@@ -121,6 +122,34 @@ export default function PlannerHome() {  const router = useRouter();
         <Text style={[styles.title, { color: colors.text }]}>Today&apos;s outfit</Text>
         <QuotaBadge left={rendersLeft} cap={5} onPress={() => router.push('/onboarding/paywall')} />
       </View>
+
+      {showPoseNudge && (
+        <View
+          style={[styles.nudge, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          testID="pose-nudge"
+        >
+          <Text style={[styles.nudgeText, { color: colors.text }]}>
+            Your weekly reel needs {missingPoses(poseQuery.data!).length} more{' '}
+            {missingPoses(poseQuery.data!).length === 1 ? 'pose' : 'poses'} — capture the pose pack
+            for full-body looks.
+          </Text>
+          <View style={styles.nudgeRow}>
+            <PressScale
+              style={[styles.nudgeCta, { backgroundColor: colors.primary }]}
+              onPress={() => {
+                void hapticFor.select();
+                router.push('/pose-pack');
+              }}
+              testID="pose-nudge-cta"
+            >
+              <Text style={[styles.nudgeCtaText, { color: colors.onPrimary }]}>Capture poses</Text>
+            </PressScale>
+            <Pressable onPress={dismissPoseNudge} hitSlop={12} testID="pose-nudge-dismiss">
+              <Text style={[styles.nudgeDismiss, { color: colors.muted }]}>Dismiss</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
 
       {outfitQuery.isPending ? (
         <View style={styles.state} testID="home-loading">
@@ -262,6 +291,12 @@ const styles = StyleSheet.create({
   buttonText: { fontSize: 15, fontWeight: '600' },
   error: { fontSize: 13, lineHeight: 18 },
   errorBox: { borderWidth: 1, borderRadius: 12, padding: 12, marginTop: 8 },
+  nudge: { borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 12, gap: 10 },
+  nudgeText: { fontSize: 14, lineHeight: 20 },
+  nudgeRow: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+  nudgeCta: { borderRadius: 12, paddingVertical: 12, paddingHorizontal: 20, alignItems: 'center' },
+  nudgeCtaText: { fontSize: 14, fontWeight: '700' },
+  nudgeDismiss: { fontSize: 14, fontWeight: '600' },
   thumbs: { flexDirection: 'row', gap: 8, marginTop: 16, flexWrap: 'wrap' },
   thumb: { width: 72, height: 72, borderRadius: 12, backgroundColor: '#EDE8E0' },
   state: { alignItems: 'center', paddingVertical: 48, gap: 8 },

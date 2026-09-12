@@ -1,9 +1,10 @@
 import React, { memo } from 'react';
-import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import type { RenderStatus } from '../lib/api';
 import { AI_DISCLOSURE } from '../lib/watermark';
 import { CounterBadge } from './CounterBadge';
+import { PressScale } from './PressScale';
 import { Watermark } from './Watermark';
 
 export type RenderViewProps = {
@@ -76,23 +77,27 @@ export const RenderView = memo(function RenderView({
         </Text>
         {onRetry ? (
           <View className="mt-sm w-full">
-            <Pressable
+            <PressScale
               testID="render-retry"
               accessibilityRole="button"
               accessibilityLabel="Try again, free of charge"
-              accessibilityState={{ busy: retrying }}
+              accessibilityState={{ disabled: retrying, busy: retrying }}
               disabled={retrying}
+              hitSlop={12}
               onPress={onRetry}
-              className={`items-center rounded-lg border border-line bg-card py-md active:bg-paperDeep ${
+              className={`items-center justify-center rounded-lg border border-line bg-card py-md active:bg-paperDeep ${
                 retrying ? 'opacity-50' : ''
               }`}
             >
-              {retrying ? (
-                <ActivityIndicator size="small" />
-              ) : (
-                <Text className="text-[15px] font-semibold text-ink">Try again (free)</Text>
-              )}
-            </Pressable>
+              <View className="items-center justify-center">
+                <Text className={`text-[15px] font-semibold text-ink ${retrying ? 'opacity-0' : ''}`}>Try again (free)</Text>
+                {retrying ? (
+                  <View className="absolute inset-0 items-center justify-center">
+                    <ActivityIndicator size="small" color="#1A1A1A" />
+                  </View>
+                ) : null}
+              </View>
+            </PressScale>
           </View>
         ) : null}
       </View>
@@ -178,23 +183,27 @@ export const RenderView = memo(function RenderView({
           </View>
         ) : null}
         {onRestyle ? (
-          <Pressable
+          <PressScale
             testID="render-restyle"
             accessibilityRole="button"
             accessibilityLabel="Restyle this look"
-            accessibilityState={{ busy: restyling }}
+            accessibilityState={{ disabled: restyling, busy: restyling }}
             disabled={restyling}
+            hitSlop={12}
             onPress={onRestyle}
-            className={`items-center rounded-lg border border-line bg-card py-md active:bg-paperDeep ${
+            className={`items-center justify-center rounded-lg border border-line bg-card py-md active:bg-paperDeep ${
               restyling ? 'opacity-50' : ''
             }`}
           >
-            {restyling ? (
-              <ActivityIndicator size="small" />
-            ) : (
-              <Text className="text-[15px] font-semibold text-ink">{restyleLabel}</Text>
-            )}
-          </Pressable>
+            <View className="items-center justify-center">
+              <Text className={`text-[15px] font-semibold text-ink ${restyling ? 'opacity-0' : ''}`}>{restyleLabel}</Text>
+              {restyling ? (
+                <View className="absolute inset-0 items-center justify-center">
+                  <ActivityIndicator size="small" color="#1A1A1A" />
+                </View>
+              ) : null}
+            </View>
+          </PressScale>
         ) : null}
       </View>
     );
