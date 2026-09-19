@@ -42,10 +42,11 @@ export const ShareDNA = memo(
           className="flex-1 justify-between bg-paper p-[48px]"
         >
           <View className="gap-y-[12px]">
-            <Text className="text-[24px] font-bold uppercase text-terracotta" style={{ letterSpacing: 2.4 }}>
-              My Style DNA
+            {/* Eyebrow in sentence case — no tracked ALL-CAPS (a template tell). */}
+            <Text className="text-[22px] font-semibold text-terracottaDeep">
+              My style DNA
             </Text>
-            <Text className="font-display text-[64px] leading-[68px] font-semibold text-ink" numberOfLines={2}>
+            <Text className="font-display text-[64px] leading-[68px] text-ink" numberOfLines={2}>
               {name ?? 'Styled by VAI'}
             </Text>
           </View>

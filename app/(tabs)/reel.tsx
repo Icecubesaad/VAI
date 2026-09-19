@@ -11,14 +11,16 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ViewToken } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { FlashList } from '@shopify/flash-list';
 import NetInfo from '@react-native-community/netinfo';
-import { useTheme } from '@/theme';
-import { EmptyState, ErrorView, ReelCard, ReelSkeleton } from '@/components';
-import { type PoseMode, type ReelCard as ReelCardData, type ReelPose } from '@/lib/api';
+import { useTheme, tokenColors } from '@/theme';
+import { ReelCard, ReelSkeleton } from '@/components';
+import { PressScale } from '@/components/PressScale';
+import { Icon } from '@/components/icons';
+import { type ReelCard as ReelCardData, type ReelPose } from '@/lib/api';
 import {
   COPY_REEL_OFFLINE_REGENERATE,
   ReelPrefetcher,
@@ -33,8 +35,6 @@ import { supabase } from '@/lib/supabase';
 import { selectClosetList, useCloset } from '@/store/closet';
 import { usePaywall } from '@/store/paywall';
 import { useSession } from '@/store/session';
-import { useTaste } from '@/store/taste';
-import { useTastePrefs } from '@/store/taste-prefs';
 import {
   MAX_REGENERATES_PER_WEEK,
   mondayOf,
@@ -58,6 +58,13 @@ function weekMondayOfParam(param: string | undefined): string {
   const d = new Date(param.length === 10 ? `${param}T00:00:00Z` : param);
   if (Number.isNaN(d.getTime())) return mondayOf();
   return mondayOf(d);
+}
+
+/** "2026-09-07" → "Sep 7" (UTC — the drop key is a UTC Monday). */
+function prettyWeek(iso: string): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 }
 
 /** `store/paywall` Tier ('free'|'trial'|'premium') → analytics SubTier ('free'|'premium'). */
@@ -85,9 +92,11 @@ function dropCostUsd(cards: ReelCardData[]): { cost_usd: number; pending_count: 
 
 // ---------------------------------------------------------------------------
 // Screen: 6th tab — vertical full-screen pager, one canonical ReelCard per
-// screen. Prefetch engine owns the current±1 full / ±2 thumb window with
-// cooperative cancel on flings (CONTRACT-perf.md reel pager recipe).
-// Deep links `vai://reel` + `vai://outfit/<date>` land here (root layout).
+// screen. Full-bleed editorial treatment: the pager fills the screen, the
+// week header + banners float over it. Prefetch engine owns the current±1
+// full / ±2 thumb window with cooperative cancel on flings (CONTRACT-perf.md
+// reel pager recipe). Deep links `vai://reel` + `vai://outfit/<date>` land
+// here (root layout).
 // ---------------------------------------------------------------------------
 
 /**
@@ -157,6 +166,7 @@ const ReelPagerRow = memo(function ReelPagerRow({
 export default function ReelScreen() {
   const router = useRouter();
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const { height: winH } = useWindowDimensions();
   const params = useLocalSearchParams<{ weekOf?: string; source?: string }>();
   const weekOf = weekMondayOfParam(firstParam(params.weekOf));
@@ -182,11 +192,6 @@ export default function ReelScreen() {
   const [regenNote, setRegenNote] = useState('');
   const [regenError, setRegenError] = useState<string | null>(null);
   const [online, setOnline] = useState(true);
-  // Style inspiration (invisible autopilot): no per-remix pose picker. The
-  // remix rides the Settings pose preference — Auto borrows the fresh taste
-  // pose when one exists, else the user's own pose ("My poses only" = keep).
-  const posePreference = useTastePrefs((s) => s.poseModeDefault);
-  const poseRefs = useTaste((s) => s.poseRefs);
 
   // One prefetcher per screen (holds the cancel generation). Connectivity is
   // read through a ref so the stable pager callbacks never go stale.
@@ -382,7 +387,7 @@ export default function ReelScreen() {
     }
   }, []);
 
-  // Try → try-on studio with the card's render context (real outfit id only;
+  // Try → changing room with the card's render context (real outfit id only;
   // the studio falls back to garment_refs when it is absent).
   const handleTry = useCallback(
     (card: ReelCardData) => {
@@ -399,10 +404,6 @@ export default function ReelScreen() {
 
   // Shop → shop tab scoped to the card's outfit (gap items) + shop-tap event.
   const regenBusy = regenTarget !== null && regeneratingId === regenTarget.id;
-  // Auto pose for the remix: fresh taste pin wins, else the user's own pose.
-  const regenFreshPin = regenTarget !== null ? (poseRefs[0] ?? null) : null;
-  const regenPose: PoseMode = posePreference === 'auto' && regenFreshPin ? 'adapt' : 'keep';
-  const regenPoseRef = regenPose === 'adapt' ? (regenFreshPin?.id ?? null) : null;
 
   const submitRegen = useCallback(() => {
     const target = regenTarget;
@@ -425,13 +426,10 @@ export default function ReelScreen() {
       setRegenError(`Weekly remix budget used — ${MAX_REGENERATES_PER_WEEK} per week, resets Monday.`);
       return;
     }
-    // Auto pose always resolves (keep, or adapt with the fresh taste pin).
+    // Remixes render on the user's own base photo.
     setRegenError(null);
     void (async () => {
-      const updated = await useReel.getState().regenerate(target.id, regenNote, {
-        poseMode: regenPose,
-        ...(regenPose === 'adapt' && regenPoseRef ? { poseRefId: regenPoseRef } : {}),
-      });
+      const updated = await useReel.getState().regenerate(target.id, regenNote);
       if (updated) {
         const uid = useSession.getState().userId;
         if (uid) {
@@ -444,14 +442,6 @@ export default function ReelScreen() {
             render_id: updated.renderId,
             cost_usd: updated.costUsd,
           });
-          // Remix is a pose selection point (gate 10): the pose_mode the
-          // regenerate actually ran with, tied to the fresh render.
-          track('pose_mode_selected', {
-            user_id: uid,
-            tier: toAnalyticsTier(usePaywall.getState().tier),
-            pose_mode: regenPose,
-            render_id: updated.renderId,
-          });
         }
         setRegenTarget(null);
         setRegenNote('');
@@ -461,7 +451,7 @@ export default function ReelScreen() {
         setRegenError('Could not remix this look. Please try again.');
       }
     })();
-  }, [regenTarget, regeneratingId, regenNote, regenPose, regenPoseRef, router]);
+  }, [regenTarget, regeneratingId, regenNote, router]);
 
   // "Style my week" → POST reel-drop. Client pre-gate (P2-5, mirrors the
   // regen path): offline → banner, exhausted
@@ -542,70 +532,61 @@ export default function ReelScreen() {
   );
 
   const tierLabel =
-    drop && cachedWeek === weekOf ? (drop.tier === 'teaser' ? ', teaser' : ', full drop') : '';
+    drop && cachedWeek === weekOf ? (drop.tier === 'teaser' ? ' · teaser' : ' · full drop') : '';
 
   return (
-    <View style={[styles.root, { backgroundColor: colors.background }]} testID="reel-screen">
-      <View style={styles.header}>
-        <View>
-          <Text style={[styles.title, { color: colors.text }]}>Your week</Text>
-          <Text style={[styles.sub, { color: colors.muted }]} testID="reel-week">
-            Week of {weekOf}
-            {tierLabel}
-          </Text>
-        </View>
-        <Pressable
-          onPress={() => void refreshWeek(weekOf)}
-          disabled={fetching}
-          hitSlop={12}
-          testID="reel-refresh"
-          accessibilityLabel="Refresh weekly reel"
-          accessibilityRole="button"
-        >
-          <Text style={[styles.refresh, { color: colors.primary }]}>{fetching ? '…' : 'Refresh'}</Text>
-        </Pressable>
-      </View>
-
-      {!!banner && (
-        <Text style={[styles.banner, { color: colors.muted }]} testID="reel-banner">
-          {banner}
-        </Text>
-      )}
-      {!!wearError && (
-        <Text style={[styles.bannerError, { color: colors.danger }]} testID="reel-wear-error">
-          {wearError}
-        </Text>
-      )}
-      {!online && !banner && (
-        <Text style={[styles.banner, { color: colors.muted }]} testID="reel-offline">
-          You&apos;re offline — showing your saved drop.
-        </Text>
-      )}
-
+    <View style={styles.root} testID="reel-screen">
+      {/* pager fills the screen; all chrome floats */}
       {fetching && cards === null ? (
-        <View style={styles.list} testID="reel-loading">
+        <View style={styles.fill} testID="reel-loading">
           <ReelSkeleton />
         </View>
       ) : fetchError && cards === null ? (
-        <View style={styles.body} testID="reel-error">
-          <ErrorView message={fetchError} onRetry={() => void refreshWeek(weekOf)} retrying={fetching} />
+        <View style={[styles.fill, styles.state]} testID="reel-error">
+          <Text style={styles.stateTitle}>Couldn&apos;t load your week</Text>
+          <Text style={styles.stateBody}>{fetchError}</Text>
+          <PressScale
+            style={styles.stateCta}
+            onPress={() => void refreshWeek(weekOf)}
+            disabled={fetching}
+            testID="reel-retry-week"
+            accessibilityRole="button"
+            accessibilityLabel="Try loading your week again"
+          >
+            <Text style={styles.stateCtaText}>{fetching ? 'Loading…' : 'Try again'}</Text>
+          </PressScale>
         </View>
       ) : cards === null || cards.length === 0 ? (
-        <View style={styles.body} testID="reel-drop-empty">
-          <EmptyState
-            title="No drop yet this week"
-            body="Fresh looks land every Monday. Style your week now — seven outfits styled on your photo."
-            actionTitle={fetching ? 'Styling…' : 'Style my week'}
-            onAction={handleStyleWeek}
-            actionLoading={fetching}
-            actionDisabled={fetching}
-          />
-          {!!fetchError && <Text style={[styles.loadingText, { color: colors.danger }]}>{fetchError}</Text>}
+        <View style={[styles.fill, styles.state]} testID="reel-drop-empty">
+          <Text style={styles.stateGlyph} aria-hidden>✦</Text>
+          <Text style={styles.stateTitle}>No drop yet this week</Text>
+          <Text style={styles.stateBody}>
+            Fresh looks land every Monday. Style your week now — seven outfits styled on your photo.
+          </Text>
+          <PressScale
+            style={styles.stateCta}
+            onPress={handleStyleWeek}
+            disabled={fetching}
+            testID="reel-style-week"
+            accessibilityRole="button"
+            accessibilityLabel="Style my week — seven outfits styled on your photo"
+          >
+            {fetching ? (
+              <ActivityIndicator color={tokenColors.stage} />
+            ) : (
+              <Text style={styles.stateCtaText}>{fetching ? 'Styling…' : 'Style my week'}</Text>
+            )}
+          </PressScale>
+          {!!fetchError && <Text style={[styles.stateError, { color: colors.danger }]}>{fetchError}</Text>}
         </View>
       ) : (
-        <View style={styles.list} testID="reel-pager" onLayout={(e) => setListH(e.nativeEvent.layout.height)}>
+        <View
+          style={styles.fill}
+          testID="reel-pager"
+          onLayout={(e) => setListH(e.nativeEvent.layout.height)}
+        >
           {!!fetchError && (
-            <Text style={[styles.stale, { color: colors.muted }]} testID="reel-stale">
+            <Text style={[styles.stale, { top: insets.top + 92 }]} testID="reel-stale">
               Showing your saved drop — refresh failed.
             </Text>
           )}
@@ -624,6 +605,48 @@ export default function ReelScreen() {
           />
         </View>
       )}
+
+      {/* floating week header (the reference's centered product-detail title) */}
+      <View pointerEvents="box-none" style={[styles.header, { paddingTop: insets.top + 6 }]}>
+        <PressScale
+          style={styles.headerCircle}
+          onPress={() => void refreshWeek(weekOf)}
+          disabled={fetching}
+          hitSlop={12}
+          testID="reel-refresh"
+          accessibilityRole="button"
+          accessibilityLabel="Refresh weekly reel"
+        >
+          <Icon name="refresh" color="#FFFFFF" size={19} />
+        </PressScale>
+        <View pointerEvents="none" style={styles.headerTitles}>
+          <Text style={styles.headerTitle}>Your week</Text>
+          <Text style={styles.headerSub} testID="reel-week">
+            Week of {prettyWeek(weekOf)}
+            {tierLabel}
+          </Text>
+        </View>
+        <View style={styles.headerSpacer} aria-hidden />
+      </View>
+
+      {/* banners — floating under the header */}
+      <View pointerEvents="none" style={[styles.banners, { top: insets.top + 66 }]}>
+        {!!banner && (
+          <Text style={styles.banner} testID="reel-banner">
+            {banner}
+          </Text>
+        )}
+        {!!wearError && (
+          <Text style={[styles.banner, { color: colors.danger }]} testID="reel-wear-error">
+            {wearError}
+          </Text>
+        )}
+        {!online && !banner && (
+          <Text style={styles.banner} testID="reel-offline">
+            You&apos;re offline — showing your saved drop.
+          </Text>
+        )}
+      </View>
 
       {/* Remix note sheet: stylist note → POST reel-regenerate (1 credit). */}
       <Modal
@@ -645,11 +668,11 @@ export default function ReelScreen() {
           />
           <SafeAreaView
             edges={['bottom']}
-            style={[styles.sheetBox, { backgroundColor: colors.surface }]}
+            style={styles.sheetBox}
             testID="regen-sheet"
           >
-            <Text style={[styles.sheetTitle, { color: colors.text }]}>Remix this look</Text>
-            <Text style={[styles.sheetSub, { color: colors.muted }]} testID="regen-budget">
+            <Text style={styles.sheetTitle}>Remix this look</Text>
+            <Text style={styles.sheetSub} testID="regen-budget">
               {regensLeft} of {MAX_REGENERATES_PER_WEEK} remixes left this week · 1 credit each
             </Text>
             <TextInput
@@ -657,8 +680,8 @@ export default function ReelScreen() {
               onChangeText={setRegenNote}
               placeholder="Note for the stylist (optional, e.g. warmer light)"
               maxLength={280}
-              style={[styles.regenInput, { borderColor: colors.border, color: colors.text }]}
-              placeholderTextColor={colors.muted}
+              style={styles.regenInput}
+              placeholderTextColor="rgba(255,255,255,0.45)"
               testID="regen-note"
             />
             {!!regenError && (
@@ -666,35 +689,26 @@ export default function ReelScreen() {
                 {regenError}
               </Text>
             )}
-            {regenPose === 'adapt' && (
-              <Text style={[styles.tasteCaption, { color: colors.muted }]} testID="regen-taste-caption">
-                Styled with your inspiration · Auto
-              </Text>
-            )}
             <View style={styles.sheetRow}>
-              <Pressable
-                style={[styles.sheetBtn, { borderColor: colors.border, borderWidth: 1 }]}
+              <PressScale
+                style={styles.sheetBtnGhost}
                 onPress={() => setRegenTarget(null)}
                 testID="regen-cancel"
               >
-                <Text style={[styles.sheetBtnText, { color: colors.text }]}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                style={[
-                  styles.sheetBtn,
-                  { backgroundColor: colors.primary },
-                  (regenBusy || regensLeft <= 0) && styles.disabled,
-                ]}
+                <Text style={styles.sheetBtnGhostText}>Cancel</Text>
+              </PressScale>
+              <PressScale
+                style={[styles.sheetBtnPrimary, (regenBusy || regensLeft <= 0) && styles.disabled]}
                 onPress={submitRegen}
                 disabled={regenBusy || regensLeft <= 0}
                 testID="regen-submit"
               >
                 {regenBusy ? (
-                  <ActivityIndicator color={colors.onPrimary} />
+                  <ActivityIndicator color="#FFFFFF" />
                 ) : (
-                  <Text style={[styles.sheetBtnText, { color: colors.onPrimary }]}>Remix</Text>
+                  <Text style={styles.sheetBtnPrimaryText}>Remix</Text>
                 )}
-              </Pressable>
+              </PressScale>
             </View>
           </SafeAreaView>
         </KeyboardAvoidingView>
@@ -703,48 +717,148 @@ export default function ReelScreen() {
   );
 }
 
+const GLASS = 'rgba(255,255,255,0.16)';
+const GLASS_BORDER = 'rgba(255,255,255,0.22)';
+
 const styles = StyleSheet.create({
-  root: { flex: 1 },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 60,
-    paddingBottom: 10,
+  root: { flex: 1, backgroundColor: tokenColors.stage },
+  fill: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  state: { alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 40 },
+  stateGlyph: { fontSize: 34, color: tokenColors.terracotta },
+  stateTitle: {
+    color: '#FFFFFF',
+    fontSize: 24,
+    lineHeight: 30,
+    fontWeight: '700',
+    fontFamily: 'PlayfairDisplay_700Bold',
+    textAlign: 'center',
   },
-  title: { fontSize: 24, fontWeight: '700' },
-  sub: { fontSize: 13, marginTop: 2 },
-  refresh: { fontSize: 15, fontWeight: '600' },
-  banner: { fontSize: 12, textAlign: 'center', paddingHorizontal: 16, paddingBottom: 6 },
-  bannerError: { fontSize: 12, textAlign: 'center', paddingHorizontal: 16, paddingBottom: 6 },
-  stale: { fontSize: 12, textAlign: 'center', paddingVertical: 6 },
-  body: { flex: 1, padding: 16, gap: 12, justifyContent: 'center' },
-  list: { flex: 1 },
-  loadingText: { fontSize: 14, textAlign: 'center' },
-  sheetScrim: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' },
-  sheetBox: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, gap: 10 },
-  sheetTitle: { fontSize: 18, fontWeight: '700' },
-  sheetSub: { fontSize: 13 },
+  stateBody: { color: 'rgba(255,255,255,0.7)', fontSize: 14, lineHeight: 21, textAlign: 'center' },
+  stateCta: {
+    marginTop: 12,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 26,
+  },
+  stateCtaText: {
+    color: tokenColors.stage,
+    fontSize: 15,
+    fontWeight: '700',
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  stateError: { fontSize: 13, textAlign: 'center', marginTop: 4 },
+
+  header: {
+    position: 'absolute',
+    top: 0,
+    left: 16,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerCircle: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: GLASS,
+    borderWidth: 1,
+    borderColor: GLASS_BORDER,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitles: { flex: 1, alignItems: 'center' },
+  headerTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    lineHeight: 23,
+    fontWeight: '700',
+    fontFamily: 'PlayfairDisplay_700Bold',
+    textShadowColor: 'rgba(15,10,28,0.45)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 6,
+  },
+  headerSub: {
+    color: 'rgba(255,255,255,0.62)',
+    fontSize: 11,
+    lineHeight: 15,
+    marginTop: 1,
+  },
+  headerSpacer: { width: 42 },
+
+  banners: { position: 'absolute', left: 16, right: 16, alignItems: 'center' },
+  banner: {
+    color: 'rgba(255,255,255,0.78)',
+    fontSize: 12,
+    lineHeight: 16,
+    textAlign: 'center',
+    backgroundColor: 'rgba(15,10,28,0.55)',
+    overflow: 'hidden',
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    marginBottom: 6,
+  },
+  stale: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 12,
+    textAlign: 'center',
+    zIndex: 10,
+  },
+
+  sheetScrim: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(10,6,20,0.6)' },
+  sheetBox: {
+    backgroundColor: tokenColors.stageLift,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+    gap: 10,
+  },
+  sheetTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: '600',
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  sheetSub: { color: 'rgba(255,255,255,0.6)', fontSize: 13 },
   regenInput: {
     borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    borderColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     fontSize: 14,
+    color: '#FFFFFF',
+    backgroundColor: 'rgba(255,255,255,0.06)',
   },
   regenErrorText: { fontSize: 13 },
-  tasteCaption: { fontSize: 12 },
-  poseRow: { flexDirection: 'row', gap: 8 },
-  poseSeg: { flex: 1, borderWidth: 1, borderRadius: 999, paddingVertical: 8, alignItems: 'center' },
-  poseSegText: { fontSize: 13, fontWeight: '600' },
-  pinHead: { flexDirection: 'row', gap: 10, alignItems: 'center' },
-  pinThumb: { width: 44, height: 56, borderRadius: 8, backgroundColor: '#EDE8E0' },
-  pinToggle: { fontSize: 14, fontWeight: '600' },
-  pinGrid: { gap: 8, marginTop: 8 },
-  pinCell: { width: 96, height: 128, borderRadius: 10, backgroundColor: '#EDE8E0' },
-  sheetRow: { flexDirection: 'row', gap: 10 },
-  sheetBtn: { flex: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
-  sheetBtnText: { fontSize: 15, fontWeight: '700' },
+  sheetRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  sheetBtnGhost: {
+    flex: 1,
+    borderRadius: 999,
+    paddingVertical: 14,
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  sheetBtnGhostText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
+  sheetBtnPrimary: {
+    flex: 1,
+    borderRadius: 999,
+    paddingVertical: 14,
+    alignItems: 'center',
+    backgroundColor: tokenColors.terracottaDeep,
+  },
+  sheetBtnPrimaryText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+    fontFamily: 'Poppins_600SemiBold',
+  },
   disabled: { opacity: 0.5 },
 });

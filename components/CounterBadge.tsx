@@ -32,18 +32,17 @@ export const CounterBadge = memo(function CounterBadge({
       accessible
       accessibilityRole="text"
       accessibilityLabel={`Renders remaining: ${label}. Activate upgrade for more.`}
-      className={`flex-row items-center gap-x-sm self-start rounded-pill border px-md py-[6px] ${
+      className={`flex-row items-center gap-x-sm self-start rounded-pill border px-md py-[7px] ${
         exhausted ? 'border-terracotta bg-terracottaWash' : 'border-line bg-card'
       }`}
     >
-      {/* pip meter — fixed width so FlashList rows never shift (no layout thrash) */}
-      <View className="flex-row gap-x-[3px]" aria-hidden>
-        {Array.from({ length: total }, (_, i) => (
-          <View
-            key={i}
-            className={`h-[6px] w-[6px] rounded-full ${i < remaining ? 'bg-terracotta' : 'bg-line'}`}
-          />
-        ))}
+      {/* meter: one slim track, violet fill — reads as remaining-at-a-glance
+          without the chunky dot row */}
+      <View className="h-[4px] w-[34px] overflow-hidden rounded-full bg-line" aria-hidden>
+        <View
+          className="h-full rounded-full bg-terracottaDeep"
+          style={{ width: `${total > 0 ? Math.max(0, Math.min(100, (remaining / total) * 100)) : 0}%` }}
+        />
       </View>
       <Text className={`text-[13px] leading-[18px] font-semibold ${exhausted ? 'text-terracottaDeep' : 'text-inkSoft'}`}>
         {label}
@@ -58,7 +57,7 @@ export const CounterBadge = memo(function CounterBadge({
           void hapticFor.select();
           onUpgrade();
         }}
-        className="rounded-pill bg-ink px-sm py-[3px] active:opacity-80"
+        className="rounded-pill bg-terracottaDeep px-sm py-[4px] active:opacity-80"
       >
         <Text className="text-[12px] leading-[16px] font-bold text-white">
           {exhausted ? 'Upgrade' : 'Get more'}

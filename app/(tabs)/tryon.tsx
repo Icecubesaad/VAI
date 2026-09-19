@@ -2,21 +2,24 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  Linking,
-  Modal,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
+  useWindowDimensions,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Image } from 'expo-image';
 import * as Crypto from 'expo-crypto';
 import { useTheme } from '@/theme';
-import { PressScale, QuotaBadge, RenderProgress, RenderView, ResultReveal } from '@/components';
+import { tokenColors } from '@/theme';
+import { PressScale } from '@/components/PressScale';
+import { Icon } from '@/components/icons';
 import {
   ApiError,
   api,
@@ -24,22 +27,27 @@ import {
   type RenderJob,
   type RenderMode,
   type RenderTier,
-  type PoseMode,
+  type Garment,
 } from '@/lib/api';
 import { renderCostPropsFromResult, track } from '@/lib/analytics';
 import { hapticFor } from '@/lib/haptics';
 import { createSignedBasePhotoUrl, supabase } from '@/lib/supabase';
+import { comboKey, comboLabel, buildCombos, type OutfitCombo } from '@/lib/outfit-combos';
 import { useSession } from '@/store/session';
 import { useCloset, selectClosetList } from '@/store/closet';
 import { useQuotas } from '@/store/quotas';
 import { usePaywall } from '@/store/paywall';
-import { useTaste } from '@/store/taste';
-import { useTastePrefs } from '@/store/taste-prefs';
+import { useReel } from '@/store/reel';
+import { useComboRenders } from '@/store/combos';
 
 const POLL_MS = 4000;
 const POLL_TIMEOUT_MS = 95_000;
 
-/** expo-router params can arrive as `string | string[]` — take the first non-empty. */
+/** Combo rail metrics — snap step = card + gap; offset multiples center a card. */
+const CARD_W = 88;
+const CARD_H = 112;
+const RAIL_GAP = 10;
+const RAIL_STEP = CARD_W + RAIL_GAP;/** expo-router params can arrive as `string | string[]` — take the first non-empty. */
 function firstParam(v: string | string[] | undefined): string | null {
   if (typeof v === 'string') return v.length > 0 ? v : null;
   if (Array.isArray(v)) return v.find((x) => x.length > 0) ?? null;
@@ -59,10 +67,11 @@ function toAnalyticsTier(tier: string): 'free' | 'premium' {
 }
 
 /**
- * Try-on studio: base-photo thumb, outfit selector, Generate, 2-up compare.
- * Counter badge "X of 5 left" + one-tap upgrade. Free renders = std queue;
- * premium = priority + Max tier. Renders take 10–55s IRL — async poll, never
- * a fake countdown ("usually ~20s").
+ * Changing room: full-bleed mirror, snap-scroll rail of combos built from the
+ * closet (founder reference §room). Centering a card wears that combo — when
+ * a render of it exists (this session's renders, or a weekly-drop look
+ * matched by garment set) the mirror swaps to it; otherwise "See it on me"
+ * renders the centered look.
  */
 export default function TryOnScreen() {
   const router = useRouter();
@@ -94,6 +103,8 @@ export default function TryOnScreen() {
     return ids.length > 0 ? ids : null;
   }, [params.garmentIds, params.garment_ids]);
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
+  const { width: winW } = useWindowDimensions();
   const basePhotoId = useSession((s) => s.basePhotoId);
   const basePhotoUrl = useSession((s) => s.basePhotoUrl);
   const setBasePhoto = useSession((s) => s.setBasePhoto);
@@ -110,20 +121,108 @@ export default function TryOnScreen() {
   const [job, setJob] = useState<RenderJob | null>(null);
   const [phase, setPhase] = useState<'idle' | 'starting' | 'rendering' | 'failed'>('idle');
   const [error, setError] = useState<string | null>(null);
-  // Style inspiration (invisible autopilot): no pose picker UI. Pose resolves
-  // to auto — the user's own pose unless a fresh taste pose exists (then Pin
-  // pose borrows it; "My poses only" in Settings forces keep). Share-back
-  // stays behind an explicit user tap.
-  const tasteConnected = useTaste((s) => s.connected);
-  const tasteBoards = useTaste((s) => s.boards);
-  const poseRefs = useTaste((s) => s.poseRefs);
-  const posePreference = useTastePrefs((s) => s.poseModeDefault);
-  const [shareOpen, setShareOpen] = useState(false);
-  const [shareBoardId, setShareBoardId] = useState<string | null>(null);
-  const [sharing, setSharing] = useState(false);
-  const [shareError, setShareError] = useState<string | null>(null);
-  const [sharedUrl, setSharedUrl] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // -- changing room: combo rail -------------------------------------------
+  // A forwarded look (reel/planner handoff) leads the rail even when it isn't
+  // one of the generated combos — the room opens wearing what was tapped.
+  const combos = useMemo(() => {
+    const built = buildCombos(garments);
+    if (heroGarmentIds && !built.some((c) => c.id === comboKey(heroGarmentIds))) {
+      return [
+        {
+          id: comboKey(heroGarmentIds),
+          garmentIds: heroGarmentIds,
+          label: comboLabel(heroGarmentIds, garments),
+          formality: 0,
+          occasion: 'casual' as const,
+        },
+        ...built,
+      ];
+    }
+    return built;
+  }, [garments, heroGarmentIds]);
+  const garmentById = useMemo(() => {
+    const map: Record<string, Garment> = {};
+    for (const g of garments) map[g.id] = g;
+    return map;
+  }, [garments]);
+  const comboRenders = useComboRenders((s) => s.renders);
+  const reelDrop = useReel((s) => s.drop);
+  const [comboIndex, setComboIndex] = useState(0);
+  const comboIndexRef = useRef(0);
+  // State, not just a ref: the initial-snap effect must re-run when the rail
+  // lays out (layout lands after first effects — a ref alone never re-fires it).
+  const [railLaidOut, setRailLaidOut] = useState(false);
+  const railRef = useRef<FlatList<OutfitCombo> | null>(null);
+  const initialSnapRef = useRef(false);
+  // The combo a started render belongs to — its output joins the rail cache.
+  const renderedComboKeyRef = useRef<string | null>(null);
+
+  // Weekly-drop looks join the rail: match by garment set, fill gaps only.
+  useEffect(() => {
+    if (!reelDrop) return;
+    const entries: Record<string, { url: string; renderId: string }> = {};
+    for (const c of reelDrop.cards) {
+      if (c.imageUrl) entries[comboKey(c.garmentIds)] = { url: c.imageUrl, renderId: c.renderId };
+    }
+    if (Object.keys(entries).length > 0) useComboRenders.getState().seed(entries);
+  }, [reelDrop]);
+
+  // Wore-it receipt state lives here (above applyCombo) so centering a
+  // new combo can clear the last combo's receipt.
+  const [woreBusy, setWoreBusy] = useState(false);
+  const [woreDone, setWoreDone] = useState(false);
+
+  const applyCombo = useCallback(
+    (index: number) => {
+      const combo = combos[index];
+      if (!combo) return;
+      comboIndexRef.current = index;
+      setComboIndex(index);
+      setSelected(combo.garmentIds);
+      // New combo centered → the wore-it receipt belongs to the last one.
+      setWoreDone(false);
+    },
+    [combos],
+  );
+
+  // Initial wear: the planner/reel handoff combo when forwarded, else the
+  // first card — snapped without animation once the rail has laid out.
+  useEffect(() => {
+    if (combos.length === 0 || !railLaidOut || initialSnapRef.current) return;
+    initialSnapRef.current = true;
+    let idx = 0;
+    if (heroGarmentIds) {
+      const found = combos.findIndex((c) => c.id === comboKey(heroGarmentIds));
+      if (found >= 0) idx = found;
+    }
+    railRef.current?.scrollToOffset({ offset: idx * RAIL_STEP, animated: false });
+    applyCombo(idx);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [combos, heroGarmentIds, railLaidOut]);
+
+  const onRailMomentumEnd = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const x = e.nativeEvent.contentOffset.x;
+      const idx = Math.min(combos.length - 1, Math.max(0, Math.round(x / RAIL_STEP)));
+      if (idx !== comboIndexRef.current) {
+        void hapticFor.select();
+        applyCombo(idx);
+      }
+    },
+    [applyCombo, combos.length],
+  );
+
+  // A finished render joins the rail cache under its combo — scrolling back
+  // to that card now swaps the mirror to the render.
+  useEffect(() => {
+    if (!job || job.status !== 'done' || !job.outputUrl) return;
+    const key =
+      renderedComboKeyRef.current ??
+      (combos[comboIndexRef.current]?.id ?? null);
+    if (key) useComboRenders.getState().put(key, job.outputUrl, job.id);
+  }, [job, combos]);
 
   // Planner handoff: pre-select the hero garments so Generate renders the
   // planned look (mount-only; the user can still change the selection, which
@@ -174,12 +273,6 @@ export default function TryOnScreen() {
       }
     })();
   }, [basePhotoId, setBasePhoto]);
-
-  const freshPosePin = useMemo(() => poseRefs[0] ?? null, [poseRefs]);
-  // Auto: keep the user's pose unless a fresh taste pose exists.
-  const poseMode: PoseMode = posePreference === 'auto' && freshPosePin ? 'adapt' : 'keep';
-  const poseRefId = poseMode === 'adapt' ? (freshPosePin?.id ?? null) : null;
-  const styledWithTaste = poseMode === 'adapt';
 
   const rendersLeft = tier === 'free' ? rendersLeftFree : Math.max(0, monthlyCap - monthlyUsed);
   const cap = tier === 'free' ? 5 : monthlyCap;
@@ -319,11 +412,16 @@ export default function TryOnScreen() {
     } else if (basePhotoId === null) {
       return;
     }
-    // Auto pose always resolves (keep, or adapt with the fresh taste pin) —
-    // no picker, no missing-ref state.
+    // Renders always use the user's own base-photo pose.
     setError(null);
     setPhase('starting');
     const startedAt = Date.now();
+    renderedComboKeyRef.current =
+      mode === 'restyle'
+        ? renderedComboKeyRef.current
+        : selected.length > 0
+          ? comboKey(selected)
+          : null;
     // Settle helper shared by all three modes (done → mirror + track).
     const settleStart = (r: RenderJob) => {
       setJob(r);
@@ -351,21 +449,15 @@ export default function TryOnScreen() {
       // Restyle taps route to the EXISTING finished render (P1-4).
       if (mode === 'restyle' && job && job.status === 'done') {
         const note = restyleNote.trim().slice(0, 280);
-        // Idempotency mirrors the server key inputs (render|note|pose — the
-        // shared restyle core hashes pose into promptHash, so the client key
-        // must too or keep/adapt restyles of the same note would collide).
+        // Idempotency mirrors the server key inputs (render|note).
         const restyleKey = await Crypto.digestStringAsync(
           Crypto.CryptoDigestAlgorithm.SHA256,
-          `${uid}|${job.id}|${note}|${poseMode}|${poseMode === 'adapt' ? (poseRefId ?? '') : ''}`,
+          `${uid}|${job.id}|${note}`,
         );
-        // Pose carries through restyle (gate 5): keep = base photo, adapt =
-        // borrow the pose from the selected pose-marked pin.
         const rr = await api.restyle({
           renderId: job.id,
           note,
           idempotencyKey: restyleKey,
-          poseMode,
-          ...(poseMode === 'adapt' && poseRefId ? { poseRefId } : {}),
         });
         useQuotas.getState().recordRestyle();
         if (uid) {
@@ -381,10 +473,10 @@ export default function TryOnScreen() {
       }
       const tierChoice: RenderTier = tier === 'free' ? 'std' : mode === 'compare' ? 'max' : 'std';
       const day = todayKey();
-      // Idempotency mirrors the server key inputs (user|base|outfit|day|mode|tier|pose).
+      // Idempotency mirrors the server key inputs (user|base|outfit|day|mode|tier).
       const idempotencyKey = await Crypto.digestStringAsync(
         Crypto.CryptoDigestAlgorithm.SHA256,
-        `${uid}|${basePhotoId}|${[...selected].sort().join(',')}|${day}|${mode}|${tierChoice}|${poseMode}|${poseRefId ?? ''}`,
+        `${uid}|${basePhotoId}|${[...selected].sort().join(',')}|${day}|${mode}|${tierChoice}`,
       );
       // P0-1: a REAL outfit id only. Prefer the planner hero forwarded via
       // params (same garment set), else create/lookup via plan-day — the
@@ -410,8 +502,6 @@ export default function TryOnScreen() {
         tier: tierChoice,
         idempotencyKey,
         day,
-        poseMode,
-        ...(poseMode === 'adapt' && poseRefId ? { poseRefId } : {}),
       });
       if (uid) {
         track('render_requested', {
@@ -444,8 +534,6 @@ export default function TryOnScreen() {
     tier,
     rendersLeft,
     mode,
-    poseMode,
-    poseRefId,
     selected,
     job,
     restyleNote,
@@ -456,73 +544,126 @@ export default function TryOnScreen() {
     router,
   ]);
 
-  // Share-back: board picker → explicit confirm → pinterest-share.
-  // Never auto-posts; the confirm button is the posting consent.
-  const handleShare = useCallback(async () => {
-    if (!job || job.status !== 'done' || !shareBoardId || sharing) return;
-    setShareError(null);
-    setSharing(true);
-    try {
-      const res = await api.pinterestShare({ renderId: job.id, boardId: shareBoardId });
-      if (!res.url) {
-        // Server accepted but returned no pin URL — without this the sheet
-        // sat in board-picker state looking like a silent no-op and the
-        // confirm stayed enabled (double-post risk).
-        setShareError('Posted, but Pinterest did not return a link. Check your board.');
-        return;
-      }
-      setSharedUrl(res.url);
-      const uid = useSession.getState().userId;
-      if (uid) {
-        track('pin_shared', {
-          user_id: uid,
-          tier: toAnalyticsTier(usePaywall.getState().tier),
-          render_id: job.id,
-        });
-      }
-    } catch (e) {
-      setShareError(apiErrorCopy(e).message);
-    } finally {
-      setSharing(false);
-    }
-  }, [job, shareBoardId, sharing]);
-
-  const toggleSelect = useCallback((id: string) => {
-    void hapticFor.select();
-    setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
-  }, []);
-
   const busy = phase === 'starting' || phase === 'rendering';
 
-  // Full-screen studio (CONTRACT uiux pass): the look IS the screen. Latest
-  // render fills the background (base photo before the first render), glass
-  // chrome floats over it, and the bottom combo scroller picks garments.
-  const bgUri = job && job.status === 'done' ? job.outputUrl ?? basePhotoUrl : basePhotoUrl;
+  // Surprise me: jump the rail to another combo (rail snap wears it).
+  const handleSurprise = useCallback(() => {
+    if (combos.length === 0) return;
+    void hapticFor.select();
+    let idx = Math.floor(Math.random() * combos.length);
+    if (combos.length > 1 && idx === comboIndexRef.current) idx = (idx + 1) % combos.length;
+    railRef.current?.scrollToOffset({ offset: idx * RAIL_STEP, animated: true });
+    applyCombo(idx);
+  }, [combos, applyCombo]);
+
+  // Wore it today: bumps wear_count on the centered combo's garments
+  // (cost-per-wear + the planner's no-repeat signal). Best-effort direct
+  // RPC — the outfits table already records plans; this records reality.
+  // Haptic confirms; the button disables while the write is in flight.
+  // (woreBusy/woreDone state lives above applyCombo so it can clear this.)
+  const handleWoreIt = useCallback(() => {
+    const combo = combos[comboIndexRef.current];
+    if (!combo || combo.garmentIds.length === 0 || woreBusy) return;
+    setWoreBusy(true);
+    setWoreDone(false);
+    void (async () => {
+      try {
+        const { error } = await supabase.rpc('increment_wear', { ids: combo.garmentIds });
+        if (error) throw error;
+        void hapticFor.done();
+        setWoreDone(true);
+      } catch {
+        setError('Could not log this outfit. Check your connection and try again.');
+      } finally {
+        setWoreBusy(false);
+      }
+    })();
+  }, [combos, woreBusy]);
+
+  // Full-bleed mirror: the centered combo's render when one exists, else the
+  // latest finished render, else the base photo.
+  const activeCombo = combos[comboIndex] ?? null;
+  const activeRender = activeCombo ? comboRenders[activeCombo.id] : undefined;
+  const bgUri =
+    activeRender?.url ??
+    (job && job.status === 'done' ? job.outputUrl ?? basePhotoUrl : basePhotoUrl);
+  const railPad = Math.max(16, (winW - CARD_W) / 2);
+
+  const renderRailItem = useCallback(
+    ({ item, index }: { item: OutfitCombo; index: number }) => {
+      const pieces = item.garmentIds
+        .map((id) => garmentById[id])
+        .filter((g): g is Garment => g !== undefined);
+      const main = pieces[0];
+      const extras = pieces.slice(1, 3);
+      const worn = index === comboIndex;
+      return (
+        <PressScale
+          scaleTo={0.94}
+          onPress={() => {
+            railRef.current?.scrollToOffset({ offset: index * RAIL_STEP, animated: true });
+            void hapticFor.select();
+            applyCombo(index);
+          }}
+          testID={`combo-card-${index}`}
+          accessibilityRole="button"
+          accessibilityState={{ selected: worn }}
+          accessibilityLabel={`Wear this combo: ${item.label}`}
+        >
+          <View style={[styles.comboCard, worn && styles.comboCardActive]}>
+            {main ? (
+              <Image
+                source={{ uri: main.cutoutUrl ?? main.imageUrl }}
+                style={styles.comboMain}
+                contentFit={main.cutoutUrl ? 'contain' : 'cover'}
+                transition={150}
+              />
+            ) : null}
+            {extras.map((g, i) => (
+              <View key={g.id} style={[styles.comboExtra, { bottom: 6 + i * 26 }]}>
+                <Image
+                  source={{ uri: g.cutoutUrl ?? g.imageUrl }}
+                  style={styles.comboExtraImg}
+                  contentFit={g.cutoutUrl ? 'contain' : 'cover'}
+                  transition={150}
+                />
+              </View>
+            ))}
+          </View>
+        </PressScale>
+      );
+    },
+    [garmentById, comboIndex, applyCombo],
+  );
 
   return (
-    <View style={[styles.root, { backgroundColor: '#0E0C0A' }]} testID="tryon-screen">
-      {/* full-bleed background */}
+    <View style={styles.root} testID="tryon-screen">
+      {/* full-bleed mirror */}
       {bgUri ? (
         <Image
           source={{ uri: bgUri }}
           style={StyleSheet.absoluteFill}
           contentFit="cover"
-          transition={250}
-          accessibilityLabel={job && job.status === 'done' ? 'Your try-on result' : 'Your base photo'}
+          transition={350}
+          accessibilityLabel={
+            activeRender ? 'Your try-on for this look' : job && job.status === 'done' ? 'Your try-on result' : 'Your base photo'
+          }
         />
       ) : (
         <View style={StyleSheet.absoluteFill} testID="tryon-empty-bg">
           <View style={styles.emptyStage}>
-            <Text style={styles.emptyStageTitle}>Your studio</Text>
+            <View style={styles.emptyStageGlow} aria-hidden />
+            <Text style={styles.emptyStageTitle}>Your changing room</Text>
             <Text style={styles.emptyStageBody}>
               {garments.length === 0
                 ? 'Add garments to your closet, take a mirror selfie, and see every look on you.'
-                : 'Take a mirror selfie to see your closet on you.'}
+                : 'One mirror selfie — every combo in your closet, rendered on you.'}
             </Text>
             <PressScale
               style={styles.emptyStageBtn}
               onPress={() => router.push(garments.length === 0 ? '/(tabs)/closet' : '/onboarding/selfie-capture')}
               testID="tryon-empty-cta"
+              accessibilityRole="button"
             >
               <Text style={styles.emptyStageBtnText}>
                 {garments.length === 0 ? 'Open your closet' : 'Take a mirror selfie'}
@@ -532,51 +673,62 @@ export default function TryOnScreen() {
         </View>
       )}
 
-      {/* legibility scrims */}
-      <View pointerEvents="none" style={styles.scrimTop} aria-hidden />
-      <View pointerEvents="none" style={styles.scrimBottom} aria-hidden />
+      {/* legibility scrims — soft fades, never hard bands */}
+      <LinearGradient
+        pointerEvents="none"
+        colors={['rgba(15,10,28,0.55)', 'rgba(15,10,28,0.28)', 'rgba(15,10,28,0)']}
+        locations={[0, 0.55, 1]}
+        style={styles.scrimTop}
+        aria-hidden
+      />
+      <LinearGradient
+        pointerEvents="none"
+        colors={['rgba(15,10,28,0)', 'rgba(15,10,28,0.45)', 'rgba(15,10,28,0.72)']}
+        locations={[0, 0.45, 1]}
+        style={styles.scrimBottom}
+        aria-hidden
+      />
 
-      {/* floating chrome */}
-      <View style={styles.chromeTop}>
+          {/* floating chrome: back · retake / title · quota */}
+      <View style={[styles.chromeTop, { top: insets.top + 8 }]}>
         <PressScale
           style={styles.glassBtn}
-          onPress={() => router.push('/onboarding/selfie-capture')}
-          testID="tryon-retake"
+          onPress={() => {
+            if (router.canGoBack()) router.back();
+            else router.push('/(tabs)');
+          }}
+          testID="tryon-back"
           accessibilityRole="button"
-          accessibilityLabel="Retake your base photo"
+          accessibilityLabel="Leave the changing room"
         >
-          <Text style={styles.glassBtnText}>◉</Text>
+          <Icon name="chevronLeft" color="#FFFFFF" size={20} strokeWidth={2.1} />
         </PressScale>
-        <View style={{ flex: 1 }} />
-        {job && job.status === 'done' ? (
+        <View style={styles.chromeTitleWrap} pointerEvents="none">
+          <Text style={styles.chromeTitle}>Studio</Text>
+        </View>
+        <View style={styles.chromeRight}>
           <PressScale
             style={styles.glassBtn}
-            onPress={() => {
-              setShareError(null);
-              setSharedUrl(null);
-              setShareBoardId(null);
-              if (!tasteConnected) router.push('/pinterest-connect');
-              else setShareOpen(true);
-            }}
-            testID="share-pinterest"
+            onPress={() => router.push('/onboarding/selfie-capture')}
+            testID="tryon-retake"
             accessibilityRole="button"
-            accessibilityLabel="Save this look to Pinterest"
+            accessibilityLabel="Retake your base photo"
           >
-            <Text style={styles.glassBtnText}>P</Text>
+            <Icon name="tryon" color="#FFFFFF" size={19} />
           </PressScale>
-        ) : null}
-        <PressScale
-          style={styles.glassQuota}
-          onPress={() => router.push('/onboarding/paywall')}
-          testID="tryon-quota"
-          accessibilityRole="button"
-          accessibilityLabel={rendersLeft + ' of ' + cap + ' renders left. Upgrade for more.'}
-        >
-          <Text style={styles.glassQuotaText}>{rendersLeft + ' of ' + cap}</Text>
-        </PressScale>
+          <PressScale
+            style={styles.glassQuota}
+            onPress={() => router.push('/onboarding/paywall')}
+            testID="tryon-quota"
+            accessibilityRole="button"
+            accessibilityLabel={rendersLeft + ' of ' + cap + ' renders left. Upgrade for more.'}
+          >
+            <Text style={styles.glassQuotaText}>{rendersLeft + ' of ' + cap}</Text>
+          </PressScale>
+        </View>
       </View>
 
-      {/* error + retry (over the photo) */}
+      {/* error + retry (over the mirror) */}
       {!!error && (
         <View style={styles.errorGlass} testID="tryon-error">
           <Text style={styles.errorGlassText} numberOfLines={3}>
@@ -597,22 +749,25 @@ export default function TryOnScreen() {
         </View>
       )}
 
-      {/* render progress: honest server-state copy, centered over the photo */}
+      {/* render progress: honest server-state copy, centered over the mirror */}
       {busy ? (
         <View style={styles.progressGlass} testID="tryon-loading">
-          <ActivityIndicator color="#FFFFFF" />
-          <Text style={styles.progressText}>
-            {phase === 'starting'
-              ? 'Sending to the studio…'
-              : job && job.status === 'queued'
-                ? 'In the queue…'
-                : 'Rendering your look…'}
-          </Text>
+          <View style={styles.progressCard}>
+            <ActivityIndicator color="#FFFFFF" />
+            <Text style={styles.progressText}>
+              {phase === 'starting'
+                ? 'Sending to the studio…'
+                : job && job.status === 'queued'
+                  ? 'In the queue…'
+                  : 'Rendering your look…'}
+            </Text>
+          </View>
         </View>
       ) : null}
 
-      {/* bottom dock: combo scroller + pills */}
-      <View pointerEvents="box-none" style={styles.dock}>
+      {/* bottom dock: look rail over a glass control bar (inspo: one
+          violet AI Suggestion pill flanked by shuffle + gallery) */}
+      <View pointerEvents="box-none" style={[styles.dock, { paddingBottom: insets.bottom + 16 }]}>
         {mode === 'restyle' ? (
           <TextInput
             value={restyleNote}
@@ -628,69 +783,68 @@ export default function TryOnScreen() {
           <Text style={styles.dockHint} testID="tryon-empty">
             Add garments to your closet to build combos.
           </Text>
+        ) : combos.length === 0 ? (
+          <Text style={styles.dockHint} testID="tryon-empty">
+            Add tops, bottoms or dresses and combos appear here.
+          </Text>
         ) : (
-          <FlatList
-            data={garments}
-            horizontal
-            keyExtractor={(g) => g.id}
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.selector}
-            renderItem={({ item }) => {
-              const active = selected.includes(item.id);
-              return (
-                <PressScale
-                  scaleTo={0.95}
-                  onPress={() => toggleSelect(item.id)}
-                  testID={'select-' + item.id}
-                  accessibilityRole="button"
-                  accessibilityLabel={(active ? 'Remove ' : 'Add ') + item.category + (active ? ' from' : ' to') + ' this look'}
-                  accessibilityState={{ selected: active }}
-                >
-                  <View style={[styles.pickWrap, active && styles.pickWrapActive]}>
-                    <Image
-                      source={{ uri: item.cutoutUrl ?? item.imageUrl }}
-                      style={styles.pick}
-                      contentFit="cover"
-                    />
-                  </View>
-                </PressScale>
-              );
-            }}
-          />
+          <>
+            <View style={styles.wearingRow}>
+              <Text style={styles.wearingLabel} numberOfLines={1}>
+                {activeCombo?.label ?? ''}
+              </Text>
+              {activeRender ? (
+                <View style={styles.onYouChip} testID="tryon-on-you">
+                  <Icon name="check" color="#FFFFFF" size={11} strokeWidth={2.6} />
+                  <Text style={styles.onYouText}>On you</Text>
+                </View>
+              ) : null}
+              <PressScale
+                style={[styles.woreBtn, woreDone ? styles.woreBtnDone : null]}
+                onPress={handleWoreIt}
+                disabled={woreBusy}
+                testID="tryon-wore-it"
+                accessibilityRole="button"
+                accessibilityLabel={
+                  woreDone ? 'Logged — you wore this today' : 'Log this as what you wore today'
+                }
+              >
+                <Text style={styles.woreBtnText}>
+                  {woreBusy ? 'Logging…' : woreDone ? 'Worn ✓' : 'Wore it'}
+                </Text>
+              </PressScale>
+            </View>
+            <View pointerEvents="box-none" onLayout={() => setRailLaidOut(true)}>
+              <FlatList
+                ref={railRef}
+                data={combos}
+                horizontal
+                keyExtractor={(c) => c.id}
+                showsHorizontalScrollIndicator={false}
+                snapToInterval={RAIL_STEP}
+                snapToAlignment="start"
+                decelerationRate="fast"
+                onMomentumScrollEnd={onRailMomentumEnd}
+                contentContainerStyle={{ paddingHorizontal: railPad, gap: RAIL_GAP }}
+                renderItem={renderRailItem}
+                testID="tryon-combo-rail"
+              />
+            </View>
+          </>
         )}
-        <View style={styles.pillRow}>
+        {/* inspo control bar: one frosted bar, shuffle · AI Suggestion · gallery */}
+        <View style={styles.controlBar}>
           <PressScale
-            style={styles.surprisePill}
-            onPress={() => {
-              void hapticFor.select();
-              // Real combo pick from the real closet: dress or top+bottom,
-              // plus layer + shoes when owned — never random noise.
-              const pick = (cat: string) => garments.find((g) => g.category === cat && !selected.includes(g.id));
-              const next = new Set(selected);
-              next.clear();
-              const dress = pick('dress') ?? pick('onepiece');
-              if (dress) next.add(dress.id);
-              else {
-                const top = pick('top');
-                const bottom = pick('bottom');
-                if (top) next.add(top.id);
-                if (bottom) next.add(bottom.id);
-              }
-              const layer = pick('outerwear');
-              if (layer) next.add(layer.id);
-              const shoes = pick('shoes');
-              if (shoes) next.add(shoes.id);
-              if (next.size === 0 && garments.length > 0) next.add(garments[0]!.id);
-              setSelected([...next]);
-            }}
+            style={styles.controlIcon}
+            onPress={handleSurprise}
             testID="tryon-surprise"
             accessibilityRole="button"
             accessibilityLabel="Pick a combo for me from my closet"
           >
-            <Text style={styles.surpriseText}>✦ Surprise me</Text>
+            <Icon name="refresh" color="#FFFFFF" size={19} />
           </PressScale>
           <PressScale
-            style={[styles.generatePill, { opacity: canGenerate || (tier === 'free' && rendersLeft <= 0) ? 1 : 0.55 }]}
+            style={[styles.aiPill, { opacity: canGenerate || (tier === 'free' && rendersLeft <= 0) ? 1 : 0.55 }]}
             onPress={() => {
               void hapticFor.confirm();
               void handleGenerate();
@@ -709,135 +863,29 @@ export default function TryOnScreen() {
             {phase === 'starting' || phase === 'rendering' ? (
               <ActivityIndicator color="#FFFFFF" />
             ) : (
-              <Text style={styles.generateText}>
-                {tier === 'free' && rendersLeft <= 0
-                  ? 'Get more renders'
-                  : mode === 'restyle'
-                    ? 'Restyle'
-                    : mode === 'compare'
-                      ? 'Compare'
-                      : 'See it on me'}
-              </Text>
+              <View style={styles.aiPillInner}>
+                <Icon name="sparkles" color="#FFFFFF" size={16} />
+                <Text style={styles.aiPillText}>
+                  {tier === 'free' && rendersLeft <= 0
+                    ? 'Get more renders'
+                    : mode === 'restyle'
+                      ? 'Restyle'
+                      : 'AI Suggestion'}
+                </Text>
+              </View>
             )}
           </PressScale>
-        </View>
-        {job && job.status === 'done' && styledWithTaste ? (
-          <Text style={styles.tasteCaptionDark} testID="taste-caption">
-            Styled with your inspiration
-          </Text>
-        ) : null}
-      </View>
-
-      {/* Share-back: board picker → explicit confirm → pinterest-share. */}
-      <Modal visible={shareOpen} transparent animationType="slide" onRequestClose={() => setShareOpen(false)}>
-        <View style={styles.scrim}>
-          <Pressable
-            style={StyleSheet.absoluteFill}
-            onPress={() => setShareOpen(false)}
+          <PressScale
+            style={styles.controlIcon}
+            onPress={() => router.push('/(tabs)/closet')}
+            testID="tryon-wardrobe"
             accessibilityRole="button"
-            accessibilityLabel="Dismiss share sheet"
-            testID="share-backdrop"
-          />
-          <SafeAreaView
-            edges={['bottom']}
-            style={[styles.sheet, { backgroundColor: colors.surface }]}
-            testID="share-sheet"
+            accessibilityLabel="Open your closet"
           >
-            <Text style={[styles.sheetTitle, { color: colors.text }]}>Save to Pinterest</Text>
-            {tasteBoards.length === 0 ? (
-              <View style={styles.sheetBody}>
-                <Text style={[styles.sheetSub, { color: colors.muted }]}>
-                  No boards synced yet — pick boards first, then save this look.
-                </Text>
-                <Pressable
-                  style={[styles.button, { backgroundColor: colors.primary }]}
-                  onPress={() => {
-                    setShareOpen(false);
-                    router.push('/pinterest-boards');
-                  }}
-                  testID="share-pick-boards"
-                >
-                  <Text style={[styles.buttonText, { color: colors.onPrimary }]}>Choose boards</Text>
-                </Pressable>
-              </View>
-            ) : sharedUrl ? (
-              <View style={styles.sheetBody}>
-                <Text style={[styles.sheetSub, { color: colors.text }]} testID="share-saved">
-                  Saved to Pinterest ✓
-                </Text>
-                <Pressable
-                  style={[styles.button, { backgroundColor: colors.primary }]}
-                  onPress={() => void Linking.openURL(sharedUrl)}
-                  testID="share-open"
-                >
-                  <Text style={[styles.buttonText, { color: colors.onPrimary }]}>Open Pinterest</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.button, { borderColor: colors.border, borderWidth: 1 }]}
-                  onPress={() => setShareOpen(false)}
-                  testID="share-done"
-                >
-                  <Text style={[styles.buttonText, { color: colors.text }]}>Done</Text>
-                </Pressable>
-              </View>
-            ) : (
-              <View style={styles.sheetBody}>
-                <ScrollView style={styles.boardScroll} showsVerticalScrollIndicator={false}>
-                  {tasteBoards.map((b) => {
-                    const active = b.boardId === shareBoardId;
-                    return (
-                      <Pressable
-                        key={b.boardId}
-                        style={[
-                          styles.boardRow,
-                          { borderColor: colors.border },
-                          active && { borderColor: colors.primary },
-                        ]}
-                        onPress={() => setShareBoardId(b.boardId)}
-                        testID={`share-board-${b.boardId}`}
-                      >
-                        <Text style={[styles.boardName, { color: colors.text }]} numberOfLines={1}>
-                          {b.name}
-                        </Text>
-                        {active && <Text style={[styles.tickSm, { color: colors.primary }]}>✓</Text>}
-                      </Pressable>
-                    );
-                  })}
-                </ScrollView>
-                {!!shareError && (
-                  <Text style={[styles.error, { color: colors.danger }]} testID="share-error">
-                    {shareError}
-                  </Text>
-                )}
-                <Pressable
-                  style={[
-                    styles.button,
-                    { backgroundColor: shareBoardId && !sharing ? colors.primary : colors.border },
-                  ]}
-                  onPress={() => void handleShare()}
-                  disabled={!shareBoardId || sharing}
-                  testID="share-confirm"
-                >
-                  {sharing ? (
-                    <ActivityIndicator color={colors.onPrimary} />
-                  ) : (
-                    <Text style={[styles.buttonText, { color: colors.onPrimary }]}>
-                      Save this look
-                    </Text>
-                  )}
-                </Pressable>
-                <Pressable
-                  style={[styles.button, { borderColor: colors.border, borderWidth: 1 }]}
-                  onPress={() => setShareOpen(false)}
-                  testID="share-cancel"
-                >
-                  <Text style={[styles.buttonText, { color: colors.text }]}>Cancel</Text>
-                </Pressable>
-              </View>
-            )}
-          </SafeAreaView>
+            <Icon name="closet" color="#FFFFFF" size={19} />
+          </PressScale>
         </View>
-      </Modal>
+      </View>
     </View>
   );
 }
@@ -847,92 +895,206 @@ function todayKey(): string {
 }
 
 const styles = StyleSheet.create({
-  emptyStage: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 10 },
-  emptyStageTitle: { color: '#FFFFFF', fontSize: 26, fontWeight: '800', fontFamily: 'Georgia' },
-  emptyStageBody: { color: 'rgba(255,255,255,0.72)', fontSize: 14, textAlign: 'center', lineHeight: 20 },
-  emptyStageBtn: { marginTop: 10, borderRadius: 999, backgroundColor: '#FFFFFF', paddingVertical: 12, paddingHorizontal: 24 },
-  emptyStageBtnText: { color: '#1A1A1A', fontSize: 14, fontWeight: '700' },
-  scrimTop: { position: 'absolute', top: 0, left: 0, right: 0, height: 130, backgroundColor: 'rgba(10,10,10,0.42)' },
-  scrimBottom: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 300, backgroundColor: 'rgba(10,10,10,0.58)' },
-  chromeTop: { position: 'absolute', top: 54, left: 16, right: 16, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  glassBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
-  glassBtnText: { color: '#FFFFFF', fontSize: 17, fontWeight: '700' },
-  glassQuota: { borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.18)', paddingVertical: 10, paddingHorizontal: 14 },
-  glassQuotaText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
-  errorGlass: { position: 'absolute', top: 116, left: 24, right: 24, borderRadius: 16, backgroundColor: 'rgba(20,16,14,0.82)', padding: 14, gap: 8 },
-  errorGlassText: { color: '#FFFFFF', fontSize: 13, lineHeight: 18 },
-  retryPill: { alignSelf: 'flex-start', borderRadius: 999, backgroundColor: '#FFFFFF', paddingVertical: 8, paddingHorizontal: 16 },
-  retryPillText: { color: '#1A1A1A', fontSize: 13, fontWeight: '700' },
-  progressGlass: { position: 'absolute', top: '46%', left: 0, right: 0, alignItems: 'center', gap: 10 },
-  progressText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
-  dock: { position: 'absolute', bottom: 0, left: 0, right: 0, paddingBottom: 22, gap: 12 },
-  dockHint: { color: 'rgba(255,255,255,0.85)', fontSize: 14, textAlign: 'center', padding: 20 },
-  noteGlass: { marginHorizontal: 16, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.16)', color: '#FFFFFF', paddingHorizontal: 14, paddingVertical: 10, fontSize: 14 },
-  selector: { paddingHorizontal: 16, gap: 10 },
-  pickWrap: { borderRadius: 14, borderWidth: 2, borderColor: 'rgba(255,255,255,0.35)', overflow: 'hidden' },
-  pickWrapActive: { borderColor: '#FFFFFF' },
-  pick: { width: 74, height: 92 },
-  pillRow: { flexDirection: 'row', paddingHorizontal: 16, gap: 10, alignItems: 'center' },
-  surprisePill: { borderRadius: 999, backgroundColor: 'rgba(167,139,250,0.92)', paddingVertical: 14, paddingHorizontal: 18 },
-  surpriseText: { color: '#FFFFFF', fontSize: 14, fontWeight: '800' },
-  generatePill: { flex: 1, borderRadius: 999, backgroundColor: '#A78BFA', paddingVertical: 14, alignItems: 'center' },
-  generateText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800' },
-  tasteCaptionDark: { color: 'rgba(255,255,255,0.65)', fontSize: 12, textAlign: 'center' },
+  root: { flex: 1, backgroundColor: tokenColors.stage },
+  center: { alignItems: 'center', justifyContent: 'center' },
 
-  root: { flex: 1, padding: 16 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  title: { fontSize: 28, fontWeight: '700', fontFamily: 'Georgia' },
-  baseRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 12 },
-  baseThumb: { width: 56, height: 72, borderRadius: 10, backgroundColor: '#EDE8E0' },
-  baseEmpty: { borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  baseEmptyText: { fontSize: 11 },
-  baseMeta: { gap: 4 },
-  baseTitle: { fontSize: 14, fontWeight: '600' },
-  link: { fontSize: 13, fontWeight: '600' },
-  modes: { flex: 1, flexDirection: 'row', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' },
-  mode: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
-  modeText: { fontSize: 12, fontWeight: '600' },
-  button: { borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
-  buttonText: { fontSize: 15, fontWeight: '600' },
-  generate: { marginTop: 4 },
-  shareBtn: { marginTop: 10 },
-  error: { fontSize: 13, lineHeight: 18 },
-  errorBox: { borderWidth: 1, borderRadius: 12, padding: 12, marginTop: 8 },
-  tasteCaption: { fontSize: 12, marginTop: 6, textAlign: 'center' },
-  state: { alignItems: 'center', paddingVertical: 24, gap: 8 },
-  stateTitle: { fontSize: 18, fontWeight: '600' },
-  stateText: { fontSize: 14, textAlign: 'center', paddingHorizontal: 24 },
-  poseRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
-  poseLabel: { fontSize: 13, fontWeight: '600' },
-  poseSeg: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
-  poseSegText: { fontSize: 13, fontWeight: '600' },
-  pinRow: { flexDirection: 'row', gap: 12, marginTop: 10, alignItems: 'center' },
-  pinThumb: { width: 56, height: 72, borderRadius: 10, backgroundColor: '#EDE8E0' },
-  pinMeta: { flex: 1, gap: 4 },
-  pinText: { fontSize: 14, fontWeight: '600' },
-  upsell: { borderRadius: 14, padding: 14, marginTop: 12, gap: 8 },
-  upsellTitle: { fontSize: 16, fontWeight: '700' },
-  upsellBody: { fontSize: 14, lineHeight: 20 },
-  upsellRow: { flexDirection: 'row', gap: 10 },
-  upsellBtn: { flex: 1, borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
-  upsellBtnText: { fontSize: 15, fontWeight: '700' },
-  scrim: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' },
-  sheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, gap: 12, maxHeight: '80%' },
-  sheetTitle: { fontSize: 18, fontWeight: '700' },
-  sheetSub: { fontSize: 14, lineHeight: 20 },
-  sheetBody: { gap: 10 },
-  boardScroll: { maxHeight: 280 },
-  pinGrid: { gap: 8 },
-  pinCell: { width: 100, height: 140, borderRadius: 10, backgroundColor: '#EDE8E0' },
-  boardRow: {
-    borderWidth: 1.5,
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
+  emptyStage: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 10 },
+  // The violet spotlight behind the empty stage — the stage is never a void.
+  emptyStageGlow: {
+    position: 'absolute',
+    width: '120%',
+    height: '46%',
+    top: '22%',
+    borderRadius: 999,
+    backgroundColor: 'rgba(124,92,232,0.16)',
+  },
+  emptyStageTitle: { color: '#FFFFFF', fontSize: 30, lineHeight: 36, fontWeight: '700', fontFamily: 'PlayfairDisplay_700Bold', textAlign: 'center' },
+  emptyStageBody: { color: 'rgba(255,255,255,0.72)', fontSize: 14.5, lineHeight: 22, textAlign: 'center', fontFamily: 'PlayfairDisplay_700Bold_Italic', paddingHorizontal: 12 },
+  emptyStageBtn: { marginTop: 10, borderRadius: 999, backgroundColor: '#FFFFFF', paddingVertical: 12, paddingHorizontal: 24 },
+  emptyStageBtnText: { color: tokenColors.stage, fontSize: 14, fontWeight: '700' },
+
+  scrimTop: { position: 'absolute', top: 0, left: 0, right: 0, height: 140 },
+  scrimBottom: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 330 },
+
+  chromeTop: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 10,
   },
-  boardName: { fontSize: 15, fontWeight: '600', flex: 1 },
-  tickSm: { fontSize: 16, fontWeight: '700' },
+  chromeTitleWrap: { flex: 1, alignItems: 'center' },
+  chromeTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    lineHeight: 23,
+    fontWeight: '700',
+    fontFamily: 'PlayfairDisplay_700Bold',
+    textShadowColor: 'rgba(15,10,28,0.45)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 6,
+  },
+  chromeRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  glassBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  glassQuota: {
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  glassQuotaText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700', fontFamily: 'Poppins_600SemiBold' },
+
+  errorGlass: {
+    position: 'absolute',
+    top: 118,
+    left: 24,
+    right: 24,
+    borderRadius: 16,
+    backgroundColor: 'rgba(23,14,40,0.85)',
+    padding: 14,
+    gap: 8,
+  },
+  errorGlassText: { color: '#FFFFFF', fontSize: 13, lineHeight: 18 },
+  retryPill: { alignSelf: 'flex-start', borderRadius: 999, backgroundColor: '#FFFFFF', paddingVertical: 8, paddingHorizontal: 16 },
+  retryPillText: { color: tokenColors.stage, fontSize: 13, fontWeight: '700' },
+
+  progressGlass: { position: 'absolute', top: '44%', left: 0, right: 0, alignItems: 'center' },
+  progressCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: 999,
+    backgroundColor: 'rgba(23,14,40,0.72)',
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+  },
+  progressText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600', fontFamily: 'Poppins_600SemiBold' },
+
+  dock: { position: 'absolute', bottom: 0, left: 0, right: 0, gap: 12 },
+  dockHint: { color: 'rgba(255,255,255,0.85)', fontSize: 14, textAlign: 'center', padding: 20 },
+
+  wearingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 20,
+  },
+  wearingLabel: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '600',
+    fontFamily: 'Poppins_600SemiBold',
+    textShadowColor: 'rgba(15,10,28,0.45)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 6,
+  },
+  onYouChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderRadius: 999,
+    backgroundColor: tokenColors.terracottaDeep,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+  },
+  onYouText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700', fontFamily: 'Poppins_600SemiBold' },
+  woreBtn: {
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.24)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  woreBtnDone: { backgroundColor: tokenColors.terracottaDeep, borderColor: tokenColors.terracottaDeep },
+  woreBtnText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700', fontFamily: 'Poppins_600SemiBold' },
+
+  comboCard: {
+    width: CARD_W,
+    height: CARD_H,
+    borderRadius: 18,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.35)',
+    overflow: 'hidden',
+  },
+  comboCardActive: { borderColor: tokenColors.terracottaDeep },
+  comboMain: { width: '88%', height: '88%' },
+  comboExtra: {
+    position: 'absolute',
+    left: 6,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: 'rgba(23,17,38,0.14)',
+    overflow: 'hidden',
+  },
+  comboExtraImg: { width: '100%', height: '100%' },
+
+  noteGlass: {
+    marginHorizontal: 16,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    color: '#FFFFFF',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 14,
+  },
+
+  pillRow: { flexDirection: 'row', paddingHorizontal: 16, gap: 10, alignItems: 'center' },
+  // Inspo control bar: one frosted glass bar — shuffle circle · violet AI
+  // pill · closet circle. Replaces the two-detached-pills dock.
+  controlBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    marginHorizontal: 16,
+    borderRadius: 999,
+    backgroundColor: 'rgba(23,17,38,0.55)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+  },
+  controlIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  aiPill: {
+    flex: 1,
+    borderRadius: 999,
+    backgroundColor: tokenColors.terracottaDeep,
+    paddingVertical: 13,
+    alignItems: 'center',
+  },
+  aiPillInner: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  aiPillText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700', fontFamily: 'Poppins_600SemiBold' },
+  button: { borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  buttonText: { fontSize: 15, fontWeight: '600' },
+  error: { fontSize: 13, lineHeight: 18 },
 });

@@ -39,7 +39,8 @@ export const ShareCard = memo(function ShareCard({
       <Text className="text-[13px] font-semibold text-terracotta">
         Your style DNA
       </Text>
-      <Text className="font-display text-[22px] leading-[28px] font-semibold text-ink">
+      {/* The DNA teaser is the product's editorial voice — italic serif pull-line. */}
+      <Text className="font-editorial text-[22px] leading-[30px] text-ink">
         {teaser}
       </Text>
       <View className="flex-row flex-wrap gap-[8px]" aria-hidden={labels.length === 0}>

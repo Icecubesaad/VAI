@@ -1,9 +1,10 @@
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useTheme } from '@/theme';
-import { ShareCard } from '@/components';
+import { useTheme, tokenColors } from '@/theme';
+import { ShareCard, DnaFilmstrip, type DnaLook } from '@/components';
 import { api, apiErrorCopy, type QuizAnswers } from '@/lib/api';
+import { dnaGalleryFor } from '@/lib/dna-gallery';
 import { useQuiz, QUIZ_STEPS, type QuizStepKey } from '@/store/quiz';
 import { useSession } from '@/store/session';
 
@@ -206,12 +207,18 @@ export default function QuizScreen() {
 
   // Result state: DNA teaser card (shareable, watermarked) — except the
   // skip path, whose result is a local starter style, never server-scored.
+  // Fresh gallery shots of the kept personas ride the filmstrip above the
+  // card — bundled lookbook frames, never the quiz-deck photos.
   if (result) {
+    const keptLooks: DnaLook[] = result.starter
+      ? []
+      : dnaGalleryFor(splitPicks(answers.everydayStyle), String(answers.gender) === 'Womenswear');
     return (
       <View style={[styles.root, { backgroundColor: colors.background }]} testID="quiz-result">
         <Text style={[styles.title, { color: colors.text }]}>
           {result.starter ? 'Your starter style' : 'Your style DNA'}
         </Text>
+        {!result.starter && keptLooks.length > 0 ? <DnaFilmstrip looks={keptLooks} /> : null}
         {!result.starter && (
           <ShareCard
             teaser={typeof result.teaser === 'string' ? result.teaser : ''}
@@ -335,12 +342,25 @@ export default function QuizScreen() {
                 onPress={() => choose(c)}
                 style={[
                   styles.choice,
-                  { backgroundColor: chosen ? colors.primary : colors.surface, borderColor: chosen ? colors.primary : colors.border },
+                  chosen
+                    ? { backgroundColor: tokenColors.terracottaWash, borderColor: tokenColors.terracottaDeep }
+                    : { backgroundColor: colors.surface, borderColor: colors.border },
                 ]}
                 testID={`quiz-choice-${c}`}
               >
+                <View
+                  style={[
+                    styles.choiceDot,
+                    chosen
+                      ? { backgroundColor: tokenColors.terracottaDeep, borderColor: tokenColors.terracottaDeep }
+                      : { borderColor: colors.border },
+                  ]}
+                  aria-hidden
+                >
+                  {chosen ? <View style={styles.choiceDotInner} /> : null}
+                </View>
                 <Text
-                  style={[styles.choiceText, { color: chosen ? colors.onPrimary : colors.text }]}
+                  style={[styles.choiceText, { color: chosen ? tokenColors.terracottaDeep : colors.text }]}
                   numberOfLines={1}
                 >
                   {c}
@@ -398,13 +418,35 @@ export default function QuizScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, padding: 24, paddingTop: 64 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  kicker: { fontSize: 13, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 1 },
+  // Kicker in sentence case — a marker, not template chrome (the tracked
+  // ALL-CAPS eyebrow is the generated look; the serif headline carries the
+  // screen so the kicker stays quiet).
+  kicker: { fontSize: 13, fontWeight: '700', letterSpacing: 0.3 },
   progress: { fontSize: 12, fontWeight: '600' },
-  title: { fontSize: 30, fontWeight: '800', fontFamily: 'Georgia', marginTop: 10 },
+  title: { fontSize: 31, lineHeight: 37, fontWeight: '700', fontFamily: 'PlayfairDisplay_700Bold', letterSpacing: -0.2, marginTop: 10 },
   hint: { fontSize: 13, marginTop: 4, lineHeight: 18 },
   choices: { marginTop: 24, gap: 10 },
-  choice: { borderRadius: 16, borderWidth: 1, paddingVertical: 16, paddingHorizontal: 18 },
-  choiceText: { fontSize: 16, fontWeight: '600' },
+  choice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
+  },
+  // Radio-dot language: the selected ring fills, its core is white — picking
+  // a style reads as a committed mark, not a highlight.
+  choiceDot: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  choiceDotInner: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#FFFFFF' },
+  choiceText: { fontSize: 16, fontWeight: '600', flex: 1 },
   aboutScroll: { marginTop: 16, flex: 1 },
   aboutContent: { paddingBottom: 16 },
   aboutLabel: { fontSize: 15, fontWeight: '700', marginTop: 14, marginBottom: 8 },

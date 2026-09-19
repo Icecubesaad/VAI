@@ -8,7 +8,7 @@ export type CardProps = {
   padded?: boolean;
 } & ViewProps;
 
-/** Base surface — white card on paper, hairline border, warm shadow. */
+/** Base surface — white card on porcelain paper, hairline border, plum-dyed shadow. */
 export const Card = memo(function Card({
   children,
   elevated = true,

@@ -63,6 +63,9 @@ export type { ShareDNAProps } from './ShareDNA';
 export { ShareCard } from './ShareCard';
 export type { ShareCardProps } from './ShareCard';
 
+export { DnaFilmstrip } from './DnaFilmstrip';
+export type { DnaLook } from './DnaFilmstrip';
+
 export { RenderView } from './RenderView';
 export type { RenderViewProps } from './RenderView';
 
@@ -75,25 +78,6 @@ export type { ReelCard as ReelCardData, ReelCardProps } from './ReelCard';
 export { PoseGuide } from './PoseGuide';
 export type { PoseGuideProps, PoseGuidePose, PoseCheck } from './PoseGuide';
 
+export { InspirationStrip } from './InspirationStrip';
+
 export { ReelSkeleton } from './ReelSkeleton';
-
-export { PoseToggle } from './PoseToggle';
-export type { PoseToggleProps, PoseToggleMode } from './PoseToggle';
-
-export { PinGrid } from './PinGrid';
-export type { PinGridProps, PinItem } from './PinGrid';
-
-export { PinPoseCompare } from './PinPoseCompare';
-export type { PinPoseCompareProps } from './PinPoseCompare';
-
-export { ShareBackSheet, shareConfirmLabel } from './ShareBackSheet';
-export type { ShareBackSheetProps, ShareBackBoard } from './ShareBackSheet';
-
-export { PinterestConsent } from './PinterestConsent';
-export type { PinterestConsentProps } from './PinterestConsent';
-
-export { TasteCadence } from './TasteCadence';
-export type { TasteCadenceProps, TasteCadenceValue } from './TasteCadence';
-
-export { InspirationRow } from './InspirationRow';
-export type { InspirationRowProps } from './InspirationRow';

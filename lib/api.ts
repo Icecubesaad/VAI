@@ -83,10 +83,13 @@ export interface Garment {
 
 export interface QuizAnswers {
   everydayStyle: string;
-  palette: string;
   dressCode: string;
-  boldness: number; // 1-5
+  /** Spend per piece — the server requires it; the About step asks it. */
   budgetBand: string;
+  /** Legacy optional — curated quiz no longer asks (server-tolerant). */
+  palette?: string;
+  /** Legacy optional — curated quiz no longer asks (server-tolerant). */
+  boldness?: number; // 1-5
   /** Style catalog side: Menswear | Womenswear (drives the persona list). */
   gender?: string;
   /** Where they live — personalizes seasons, fabric weight, shop picks. */
@@ -750,18 +753,20 @@ function mapQuizResult(raw: unknown): QuizResult {
 // ------------------------------------------------------------ wrappers ---
 
 export const api = {
-  /** Wire is snake_case (`quiz-score` validates everyday_style/dress_code/
-   *  budget_band) — the camelCase client shape is translated here. The old
-   *  passthrough sent camelCase raw and every real quiz submit 400'd. */
+  /** Wire is snake_case — the camelCase client shape is translated here. The
+   *  old passthrough sent camelCase raw and every real quiz submit 400'd.
+   *  everyday_style + dress_code + budget_band are the required trio;
+   *  palette/boldness travel only when present (legacy callers) — quiz-score
+   *  defaults them server-side. */
   scoreQuiz: (body: { answers: QuizAnswers; selfieUrl?: string }) => {
     const a = body.answers;
     const req: Record<string, unknown> = {
       answers: {
         everyday_style: a.everydayStyle,
-        palette: a.palette,
         dress_code: a.dressCode,
-        boldness: a.boldness,
         budget_band: a.budgetBand,
+        ...(a.palette ? { palette: a.palette } : {}),
+        ...(typeof a.boldness === 'number' ? { boldness: a.boldness } : {}),
         // Extended profile — the server stores these in fit_prefs and feeds
         // them to the stylist prompt.
         ...(a.gender ? { gender: a.gender } : {}),

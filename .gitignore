@@ -52,3 +52,6 @@ coverage/
 
 expo-env.d.ts
 # @end expo-cli
+# Browser QA static bundles (rebuilt on demand, never committed)
+.expo-qa/
+.expo-qa-dev/

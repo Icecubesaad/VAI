@@ -11,3 +11,13 @@
   text-wrap: balance;
   -webkit-font-smoothing: antialiased;
 }
+
+/*
+ * RN-web hardening: absolutely-positioned decorations (mesh blobs, float
+ * cards) must never widen the page — horizontal panning of the app shell
+ * broke onboarding navigation. Content clips at the app bounds.
+ */
+html,
+body {
+  overflow-x: hidden;
+}

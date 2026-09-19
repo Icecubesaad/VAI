@@ -1,8 +1,8 @@
 import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { FlashList } from '@shopify/flash-list';
 import { useTheme } from '@/theme';
+import { MeshGradient } from '@/components/MeshGradient';
 import { GarmentCard, PressScale } from '@/components';
 import type { Garment } from '@/lib/api';
 import { hapticFor } from '@/lib/haptics';
@@ -79,13 +79,17 @@ export default function ClosetScreen() {
   );
 
   return (
-    <View style={[styles.root, { backgroundColor: colors.background }]} testID="closet-screen">
+    <View style={[styles.root, { backgroundColor: 'transparent' }]} testID="closet-screen">
+      <MeshGradient variant="closet" />
       <View style={styles.header}>
         <Text style={[styles.title, { color: colors.text }]}>Closet</Text>
         <Text style={[styles.count, { color: colors.muted }]} testID="closet-count">
           {count} of {FREE_CLOSET_CAP}
         </Text>
       </View>
+      {/* Atelier rule — one hairline under the header, same as the home cover. */}
+      <View style={styles.rule} />
+
 
       {!!insights && (
         <View style={[styles.banner, { backgroundColor: colors.surface }]} testID="insights-banner">
@@ -138,11 +142,15 @@ export default function ClosetScreen() {
           </Pressable>
         </View>
       ) : (
-        <FlashList
+        // Core FlatList: FlashList v2's ViewHolderCollection re-measures in a
+        // loop on this grid (Maximum update depth crash). Closets are <=50
+        // items on free — virtualization buys nothing here.
+        <FlatList
           data={garments}
           renderItem={renderItem}
           keyExtractor={(g) => g.id}
           numColumns={2}
+          columnWrapperStyle={styles.gridRow}
           contentContainerStyle={styles.grid}
           testID="closet-grid"
         />
@@ -154,20 +162,45 @@ export default function ClosetScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, padding: 16 },
   header: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
-  title: { fontSize: 28, fontWeight: '700', fontFamily: 'Georgia' },
+  // Serif display — the closet is the user's wardrobe atelier, not a database.
+  title: { fontSize: 30, lineHeight: 36, fontWeight: '700', fontFamily: 'PlayfairDisplay_700Bold', letterSpacing: -0.2 },
   count: { fontSize: 13 },
-  banner: { borderRadius: 12, padding: 12, marginTop: 12 },
-  bannerText: { fontSize: 14 },
+  rule: { height: 1, backgroundColor: '#E6E0F5', marginTop: 10, marginBottom: 4 },
+  banner: {
+    borderRadius: 16,
+    padding: 14,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#E6E0F5',
+    shadowColor: '#44307E',
+    shadowOpacity: 0.07,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 1,
+  },
+  // Insights read as a stylist's note — italic serif, not a system banner.
+  bannerText: { fontSize: 15, lineHeight: 21, fontFamily: 'PlayfairDisplay_700Bold_Italic' },
   addBar: { flexDirection: 'row', gap: 10, marginTop: 12 },
-  addButton: { flex: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
-  emptyCta: { borderRadius: 12, paddingVertical: 14, paddingHorizontal: 24, alignItems: 'center', marginTop: 8 },
+  addButton: {
+    flex: 1,
+    borderRadius: 999,
+    paddingVertical: 14,
+    alignItems: 'center',
+    shadowColor: '#6645D9',
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 4,
+  },
+  emptyCta: { borderRadius: 999, paddingVertical: 14, paddingHorizontal: 26, alignItems: 'center', marginTop: 8 },
   addText: { fontSize: 15, fontWeight: '600' },
-  gapButton: { flex: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  gapButton: { flex: 1, borderRadius: 999, paddingVertical: 14, alignItems: 'center', backgroundColor: '#FFFFFF' },
   gapText: { fontSize: 15, fontWeight: '600' },
   error: { fontSize: 13, lineHeight: 18 },
   errorBox: { borderWidth: 1, borderRadius: 12, padding: 12, marginTop: 8 },
   grid: { paddingVertical: 12 },
+  gridRow: { gap: 12, marginBottom: 12 },
   state: { alignItems: 'center', paddingVertical: 48, gap: 8 },
-  stateTitle: { fontSize: 18, fontWeight: '600' },
-  stateText: { fontSize: 14, textAlign: 'center', paddingHorizontal: 24 },
+  stateTitle: { fontSize: 22, lineHeight: 28, fontWeight: '700', fontFamily: 'PlayfairDisplay_700Bold' },
+  stateText: { fontSize: 14, lineHeight: 21, textAlign: 'center', paddingHorizontal: 24 },
 });

@@ -1,4 +1,6 @@
 import '../global.css';
+// Dev-only web QA harness (no-ops outside __DEV__ + web with localStorage keys set).
+import '../lib/qa-bridge';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -7,6 +9,17 @@ import * as Linking from 'expo-linking';
 import * as Notifications from 'expo-notifications';
 import * as SplashScreen from 'expo-splash-screen';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { useFonts } from 'expo-font';
+import {
+  Poppins_400Regular,
+  Poppins_500Medium,
+  Poppins_600SemiBold,
+  Poppins_700Bold,
+} from '@expo-google-fonts/poppins';
+import {
+  PlayfairDisplay_700Bold,
+  PlayfairDisplay_700Bold_Italic,
+} from '@expo-google-fonts/playfair-display';
 import { ThemeProvider } from '@/theme';
 import { getSupabase, isBackendConfigured } from '@/lib/supabase';
 import { BackendMisconfiguredScreen, RootErrorBoundary } from '@/components/RootErrorBoundary';
@@ -188,6 +201,16 @@ function pendingCriticalUrls(): string[] {
 }
 
 export default function RootLayout() {
+  // Brand voice: Poppins for UI + Playfair Display for glossed serif moments.
+  // The splash holds until fonts resolve — no FOUT, no fallback flash.
+  const [fontsLoaded] = useFonts({
+    Poppins_400Regular,
+    Poppins_500Medium,
+    Poppins_600SemiBold,
+    Poppins_700Bold,
+    PlayfairDisplay_700Bold,
+    PlayfairDisplay_700Bold_Italic,
+  });
   const [ready, setReady] = useState(false);
   const [backendError, setBackendError] = useState(false);
   const [bootError, setBootError] = useState(false);
@@ -296,7 +319,7 @@ export default function RootLayout() {
   // hide → post-paint refresh in order (paywall-status → quota mirror merge
   // inside fetchStatus). Every path hides the splash, including error paths.
   useEffect(() => {
-    if (bootedRef.current || !routerMounted) return;
+    if (bootedRef.current || !routerMounted || !fontsLoaded) return;
     bootedRef.current = true;
     void (async () => {
       // Backend gate FIRST: never touch the supabase client without
@@ -355,7 +378,7 @@ export default function RootLayout() {
         // Fonts gate: no font assets ship in v1 (UI/UX turf) — a resolved
         // promise keeps the two-gate shape so fonts plug in without restructuring.
         await awaitAppReady({
-          fontsLoaded: Promise.resolve(),
+          fontsLoaded: fontsLoaded ? Promise.resolve() : new Promise(() => undefined),
           routerMounted: Promise.resolve(),
           criticalUrls: pendingCriticalUrls(),
           fromPush: pendingRenderRef.current != null,
@@ -390,7 +413,7 @@ export default function RootLayout() {
         );
       }
     })();
-  }, [routerMounted, handleUrl, router, bootTick]);
+  }, [routerMounted, handleUrl, router, bootTick, fontsLoaded]);
 
   // Backend-error retry: env is baked at build time, so this only succeeds
   // after a reinstall / OTA that restores vars — re-check without crashing.
@@ -448,9 +471,8 @@ export default function RootLayout() {
             <Stack screenOptions={{ headerShown: false }}>
               <Stack.Screen name="index" />
               <Stack.Screen name="(tabs)" />
+              <Stack.Screen name="profile" />
               <Stack.Screen name="onboarding" />
-              <Stack.Screen name="pinterest-connect" />
-              <Stack.Screen name="pinterest-boards" />
             </Stack>
           </QueryClientProvider>
         </ThemeProvider>
@@ -460,5 +482,5 @@ export default function RootLayout() {
 }
 
 const styles = StyleSheet.create({
-  boot: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FAF8F5' },
+  boot: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FAF9FE' },
 });

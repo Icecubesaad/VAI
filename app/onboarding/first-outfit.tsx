@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { useTheme } from '@/theme';
+import { MeshGradient } from '@/components/MeshGradient';
 import { EditorialReveal, OutfitCard, PressScale, SkeletonHero } from '@/components';
 import { api, apiErrorCopy } from '@/lib/api';
 import { hapticFor } from '@/lib/haptics';
@@ -73,7 +74,8 @@ export default function FirstOutfit() {
   }, [count, markSeen, quizDone, router, setStep, tier]);
 
   return (
-    <View style={[styles.root, { backgroundColor: colors.background }]} testID="first-outfit">
+    <View style={[styles.root, { backgroundColor: 'transparent' }]} testID="first-outfit">
+      <MeshGradient variant="quiz" />
       <Text style={[styles.kicker, { color: colors.muted }]}>Your first outfit</Text>
 
       {outfitQuery.isPending && !showFallback ? (
@@ -166,13 +168,24 @@ export default function FirstOutfit() {
 const styles = StyleSheet.create({
   root: { flex: 1, padding: 24, paddingTop: 64, justifyContent: 'space-between' },
   kicker: { fontSize: 13, fontWeight: '700' },
-  title: { fontSize: 22, fontWeight: '700', textAlign: 'center' },
+  title: { fontSize: 24, lineHeight: 30, fontWeight: '700', fontFamily: 'PlayfairDisplay_700Bold', letterSpacing: -0.2, textAlign: 'center' },
   body: { fontSize: 14, textAlign: 'center', lineHeight: 20 },
-  why: { fontSize: 14, lineHeight: 20, marginTop: 12 },
+  // The stylist's verdict on the first outfit — italic serif pull-line.
+  why: { fontSize: 16, lineHeight: 23, marginTop: 12, fontFamily: 'PlayfairDisplay_700Bold_Italic', textAlign: 'center' },
   state: { alignItems: 'center', gap: 12, paddingVertical: 48 },
-  button: { borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginBottom: 16 },
+  button: {
+    borderRadius: 999,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginBottom: 16,
+    shadowColor: '#6645D9',
+    shadowOpacity: 0.34,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 7 },
+    elevation: 5,
+  },
   buttonText: { fontSize: 16, fontWeight: '700' },
   back: { fontSize: 14, textAlign: 'center', marginBottom: 16 },
-  retry: { borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginTop: 12 },
+  retry: { borderRadius: 999, paddingVertical: 12, alignItems: 'center', marginTop: 12 },
   retryText: { fontSize: 14, fontWeight: '600' },
 });

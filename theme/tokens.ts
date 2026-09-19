@@ -38,12 +38,11 @@
  *   eyebrow   LEGACY, restricted: micro-labels only (consent lines,
  *             offline captions). If it reads as chrome, delete it.
  *   body family stays system sans — legibility, zero load cost.
- * FONT GAP (no files in assets/, no useFonts gate in app/_layout):
- *   display/editorial render in Georgia on iOS, platform serif/sans
- *   fallback on Android. To go cross-platform: bundle an OFL editorial
- *   serif (e.g. Fraunces) via expo-font (already a dependency), gate in
- *   `app/_layout.tsx`, then point `fonts.display` at it. Until then,
- *   DO NOT ship a second serif — one fallback is a choice, two is drift.
+ * FONT STACK (bundled via expo-font, gated in app/_layout.tsx):
+ *   Playfair Display 700 (+700 Italic) is the display/editorial voice —
+ *   glossed serif for hero headlines, why-lines, and verdicts. Poppins
+ *   (400/500/600/700) stays the UI body family. Never introduce a third
+ *   family; if a screen needs emphasis, reach for the italic serif.
  *
  * Layout concept — "rack, not dashboard": left-aligned, ragged-right
  * headlines; media full-bleed (3:4 closet, 4:5 hero) with quiet inset UI;
@@ -75,53 +74,58 @@
  */
 
 export const colors = {
-  /** App background — muslin/calico ground. Splash-locked, do not drift. */
-  paper: '#FAF8F5',
-  /** Sunken background (sheets, inset wells) */
-  paperDeep: '#F2EDE5',
-  /** Card surface — always pure white on paper for crisp separation */
+  /**
+   * GLOSSED ATELIER polish pass (on top of the founder's soft-purple
+   * directive): the lavender family stays, but every value gains conviction.
+   * Paper goes porcelain near-white so photography carries the screens;
+   * ink deepens toward plum-black; the violet workhorse saturates so CTAs
+   * stop reading washed-out. Names kept (append-only contract) — terracotta
+   * carries the violet workhorse, oxblood the deep-plum voice.
+   */
+  paper: '#FAF9FE',
+  paperDeep: '#F1EDFB',
   card: '#FFFFFF',
-  /** Linen media well — tokenized de-facto placeholder hex (see tryon/shop/reel) */
-  well: '#EDE8E0',
-  /** Primary text */
-  ink: '#1A1A1A',
-  /** Secondary text */
-  inkSoft: '#57504A',
-  /** Tertiary / placeholder text — min 4.5:1 on paper for body, decorative only below */
-  muted: '#8A8179',
-  /** Hairline rules on paper — use as dividers, not box outlines */
-  line: '#E7DED2',
-  /** Hairline borders on white cards */
-  lineOnCard: '#EFE8DC',
+  well: '#F0EBFA',
+  ink: '#211C33',
+  inkSoft: '#565170',
+  muted: '#8B84A6',
+  line: '#E6E0F5',
+  lineOnCard: '#EFEAF9',
 
-  /** Brand workhorse — lacquer voice (CTAs, active states, selection rings) */
-  terracotta: '#C65D3B',
-  terracottaDeep: '#A34A2C',
-  terracottaWash: '#F8E7DC',
+  /** Brand workhorse — glossed violet (CTAs, active states, selection rings) */
+  terracotta: '#7C5CE8',
+  terracottaDeep: '#6645D9',
+  terracottaWash: '#EDE7FE',
 
-  /** Editorial lead — bordeaux for display kickers, DNA/share moments, value seals */
-  oxblood: '#6E2233',
-  oxbloodWash: '#F5E4E6',
+  /** Editorial lead — deep plum for kickers, DNA/share moments, value seals */
+  oxblood: '#4A2C92',
+  oxbloodWash: '#ECE5FB',
 
   /** Success / confirm — never decoration */
-  sage: '#66855F',
-  sageDeep: '#49663F',
-  sageWash: '#E4EBE0',
+  sage: '#5FA777',
+  sageDeep: '#3F7D57',
+  sageWash: '#E1F2E7',
 
-  /** Ratings / "Best value" highlight — restrained gold, never neon */
-  gold: '#A87E2A',
-  goldWash: '#F4EAD2',
+  /** Ratings / "Best value" highlight */
+  gold: '#B28A1F',
+  goldWash: '#F7EFD9',
 
-  danger: '#B3402E',
-  dangerWash: '#F7E2DC',
-  warn: '#A87E2A',
+  danger: '#D6455D',
+  dangerWash: '#FBE1E6',
+  warn: '#B28A1F',
 
-  /** Apple-pay-style premium CTA */
-  appleBlack: '#000000',
+  appleBlack: '#16101F',
   applePaper: '#FFFFFF',
 
-  /** Scrim for sheets / overlays */
-  scrim: 'rgba(26, 26, 26, 0.45)',
+  /**
+   * Immersive photo surfaces (reel, changing room) + the floating pill tab
+   * bar — deep plum-black, never pure black: photos glow against it and the
+   * white glass chrome keeps its violet cast.
+   */
+  stage: '#120C22',
+  stageLift: '#1F1738',
+
+  scrim: 'rgba(33, 28, 51, 0.45)',
 } as const;
 
 export type ColorName = keyof typeof colors;
@@ -149,10 +153,16 @@ export type SpacingName = keyof typeof spacing;
  * switch to flip once an expo-font serif lands in assets/.
  */
 export const fonts = {
-  /** Editorial serif — Georgia on iOS until the font-file gap is closed */
-  display: 'Georgia',
-  /** UI sans — system, zero load cost */
-  sans: 'System',
+  /** Glossed serif display — Playfair 700, the atelier voice (bundled via expo-font) */
+  display: 'PlayfairDisplay_700Bold',
+  displayBold: 'PlayfairDisplay_700Bold',
+  displayMedium: 'PlayfairDisplay_700Bold',
+  /** Italic editorial serif — why-lines, style verdicts, pull quotes */
+  editorial: 'PlayfairDisplay_700Bold_Italic',
+  /** UI sans — Poppins for everything else; quiet, legible, already loaded */
+  sans: 'Poppins_400Regular',
+  sansMedium: 'Poppins_500Medium',
+  sansSemi: 'Poppins_600SemiBold',
 } as const;
 
 export type FontName = keyof typeof fonts;
@@ -164,12 +174,12 @@ export type FontName = keyof typeof fonts;
  * Sentence case everywhere; kickers never uppercase.
  */
 export const typeScale = {
-  /** Confident magazine headline — tight tracking, air above (3xl/4xl) */
-  display: { fontSize: 36, lineHeight: 40, fontFamily: 'Georgia', fontWeight: '600', letterSpacing: -0.5 },
+  /** Glossed serif headline — the atelier voice, tight tracking, air above */
+  display: { fontSize: 34, lineHeight: 41, fontFamily: 'PlayfairDisplay_700Bold', fontWeight: '700', letterSpacing: -0.2 },
   title: { fontSize: 24, lineHeight: 30, fontWeight: '700' },
   headline: { fontSize: 20, lineHeight: 26, fontWeight: '700' },
   /** Serif italic pull-line — why-lines, style verdicts, empty-state invitations */
-  editorial: { fontSize: 19, lineHeight: 28, fontFamily: 'Georgia', fontStyle: 'italic', fontWeight: '400' },
+  editorial: { fontSize: 19, lineHeight: 28, fontFamily: 'PlayfairDisplay_700Bold_Italic', fontWeight: '700' },
   /** Sentence-case section marker — never uppercase, never above every heading */
   kicker: { fontSize: 13, lineHeight: 18, fontWeight: '600', letterSpacing: 0.3 },
   body: { fontSize: 16, lineHeight: 24, fontWeight: '400' },
@@ -200,30 +210,30 @@ export const radii = {
 export type RadiiName = keyof typeof radii;
 
 /**
- * Shadows — warm-dyed (#3A2E24) on every tier, never grey blur. Android
- * reads `elevation` only; iOS reads the rest. card = contact, lift =
- * resting sheets/stacks, pop = modal + premium CTA.
+ * Shadows — plum-dyed depth, never grey blur. Android reads `elevation`
+ * only; iOS reads the rest. card = contact, lift = resting sheets/stacks,
+ * pop = modal + premium CTA.
  */
 export const shadows = {
   card: {
-    shadowColor: '#3A2E24',
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
+    shadowColor: '#44307E',
+    shadowOpacity: 0.09,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 5 },
     elevation: 2,
   },
   lift: {
-    shadowColor: '#3A2E24',
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
+    shadowColor: '#44307E',
+    shadowOpacity: 0.13,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 9 },
     elevation: 4,
   },
   pop: {
-    shadowColor: '#3A2E24',
-    shadowOpacity: 0.18,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: 12 },
+    shadowColor: '#3A2668',
+    shadowOpacity: 0.22,
+    shadowRadius: 26,
+    shadowOffset: { width: 0, height: 13 },
     elevation: 8,
   },
   none: {

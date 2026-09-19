@@ -1,5 +1,6 @@
 import React, { memo } from 'react';
-import { Text, ActivityIndicator, View, type PressableProps } from 'react-native';
+import { StyleSheet, Text, ActivityIndicator, View, type PressableProps } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { hapticFor } from '../lib/haptics';
 import { MOTION } from '../lib/motion';
 import { PressScale } from './PressScale';
@@ -22,13 +23,15 @@ export type ButtonProps = {
 } & Pick<PressableProps, 'accessibilityRole'>;
 
 const SIZES: Record<ButtonSize, { container: string; text: string }> = {
-  sm: { container: 'px-md py-[6px] rounded-md', text: 'text-[14px] leading-[20px] font-semibold' },
-  md: { container: 'px-lg py-md rounded-lg', text: 'text-[16px] leading-[24px] font-semibold' },
-  lg: { container: 'px-xl py-[14px] rounded-xl', text: 'text-[17px] leading-[24px] font-bold' },
+  sm: { container: 'px-md py-[8px] rounded-pill', text: 'text-[14px] leading-[20px] font-semibold' },
+  md: { container: 'px-xl py-[14px] rounded-pill', text: 'text-[16px] leading-[24px] font-semibold' },
+  lg: { container: 'px-xl py-[16px] rounded-pill', text: 'text-[17px] leading-[24px] font-bold' },
 };
 
 /**
- * VAI Button. Terracotta primary, ink-on-paper secondary, quiet ghost.
+ * VAI Button. Glossed violet primary (gradient + top-edge sheen, so the CTA
+ * has weight instead of reading as a flat pastel slab), ink-on-paper
+ * secondary, quiet ghost.
  * `premium` = Apple-pay-style black pill (see PremiumCTA for the full
  *  logo lockup used on paywall / quota-upsell surfaces).
  * `dev` = dashed dev-login style for onboarding debug entry points only —
@@ -52,7 +55,7 @@ export const Button = memo(function Button({
   const isDisabled = disabled || loading;
 
   const variantCls: Record<ButtonVariant, string> = {
-    primary: 'bg-terracotta active:bg-terracottaDeep',
+    primary: '',
     secondary: 'bg-card border border-line active:bg-paperDeep',
     ghost: 'bg-transparent active:bg-paperDeep',
     premium: 'bg-appleBlack active:opacity-80',
@@ -68,6 +71,17 @@ export const Button = memo(function Button({
     dev: 'text-inkSoft',
   };
 
+  const label = (
+    <View className="items-center justify-center">
+      <Text className={`${s.text} ${textCls[variant]} ${loading ? 'opacity-0' : ''}`}>{title}</Text>
+      {loading ? (
+        <View className="absolute inset-0 items-center justify-center">
+          <ActivityIndicator size="small" color={variant === 'secondary' || variant === 'ghost' || variant === 'dev' ? '#211C33' : '#FFFFFF'} />
+        </View>
+      ) : null}
+    </View>
+  );
+
   return (
     <PressScale
       testID={testID}
@@ -82,22 +96,48 @@ export const Button = memo(function Button({
         else if (haptic === 'select') void hapticFor.select();
         onPress();
       }}
-      className={`${s.container} ${variantCls[variant]} items-center justify-center ${
+      className={`${s.container} ${variantCls[variant]} items-center justify-center overflow-hidden ${
         isDisabled ? 'opacity-50' : ''
       }`}
+      style={variant === 'primary' ? styles.primaryDepth : undefined}
     >
-      {/* Loading overlays the spinner on invisible title text so the
-          button keeps its exact measured size (no layout shift). */}
-      <View className="items-center justify-center">
-        <Text className={`${s.text} ${textCls[variant]} ${loading ? 'opacity-0' : ''}`}>{title}</Text>
-        {loading ? (
-          <View className="absolute inset-0 items-center justify-center">
-            <ActivityIndicator size="small" color={variant === 'secondary' || variant === 'ghost' || variant === 'dev' ? '#1A1A1A' : '#FFFFFF'} />
-          </View>
-        ) : null}
-      </View>
+      {variant === 'primary' ? (
+        <>
+          {/* Gloss: deep-base violet gradient + a hairline sheen at the top
+              edge — the button reads lacquered, not flat. */}
+          <LinearGradient
+            colors={['#8B6CF2', '#6645D9']}
+            start={{ x: 0.2, y: 0 }}
+            end={{ x: 0.8, y: 1 }}
+            style={StyleSheet.absoluteFill}
+            pointerEvents="none"
+          />
+          <View style={styles.primarySheen} pointerEvents="none" />
+          {label}
+        </>
+      ) : (
+        label
+      )}
     </PressScale>
   );
+});
+
+const styles = StyleSheet.create({
+  primaryDepth: {
+    shadowColor: '#6645D9',
+    shadowOpacity: 0.38,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 5,
+  },
+  primarySheen: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.4)',
+  },
 });
 
 export type PremiumCTAProps = {

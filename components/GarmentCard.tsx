@@ -64,11 +64,11 @@ export const GarmentCard = memo(function GarmentCard({
       accessibilityState={{ selected, disabled }}
       disabled={disabled}
       onPress={onPress ? () => onPress(garment.id) : undefined}
-      className={`overflow-hidden rounded-lg border bg-card active:opacity-90 ${
+      className={`overflow-hidden rounded-[18px] border bg-card shadow-card active:opacity-90 ${
         selected ? 'border-terracotta' : 'border-lineOnCard'
       } ${disabled ? 'opacity-50' : ''}`}
     >
-      <View className="aspect-[3/4] w-full bg-paperDeep">
+      <View className="aspect-[3/4] w-full bg-well">
         {photo ? (
           <Image
             source={{ uri: photo }}
@@ -79,7 +79,7 @@ export const GarmentCard = memo(function GarmentCard({
           />
         ) : (
           <View className="h-full w-full items-center justify-center" accessible accessibilityLabel="No photo yet">
-            <Text className="font-display text-[20px] capitalize text-muted">{garment.category}</Text>
+            <Text className="font-display text-[22px] capitalize text-inkSoft">{garment.category}</Text>
           </View>
         )}
       </View>
@@ -106,7 +106,7 @@ export const GarmentCard = memo(function GarmentCard({
         accessibilityHint="Removes this item from your closet"
         hitSlop={12}
         onPress={onDelete}
-        className="absolute right-sm top-sm items-center justify-center rounded-pill bg-black/55 px-sm py-[4px] active:opacity-70"
+        className="absolute right-sm top-sm h-[28px] w-[28px] items-center justify-center rounded-full bg-black/45 active:opacity-70"
       >
         <Text className="text-[12px] leading-[16px] font-bold text-white" aria-hidden>
           ✕

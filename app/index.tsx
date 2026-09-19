@@ -40,5 +40,5 @@ export default function IndexGate() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FAF8F5' },
+  root: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F7F4FE' },
 });

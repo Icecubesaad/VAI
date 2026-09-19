@@ -40,10 +40,13 @@ function fallbackSeason(undertone: string | undefined, palette: QuizAnswers["pal
 
 function validateQuiz(a: QuizAnswers, selfieUrl: unknown): void {
   if (!a || typeof a !== "object") throw badRequest("quiz_invalid", "answers object required");
+  // Required trio: personas + daily reality (dress code) + spend level.
+  // Palette / boldness ride as server defaults (chosen-agnostic) so legacy
+  // callers keep working and curated callers never 400 on unasked fields.
   if (!a.everyday_style || !a.dress_code || !a.budget_band) {
     throw badRequest("quiz_incomplete", "everyday_style, dress_code and budget_band are required");
   }
-  const b = Number(a.boldness);
+  const b = a.boldness === undefined ? 3 : Number(a.boldness);
   if (!Number.isFinite(b) || b < 1 || b > 5) {
     throw badRequest("quiz_invalid", "boldness must be 1–5");
   }
@@ -110,9 +113,9 @@ Deno.serve(async (req) => {
     const { error: upErr } = await sb.from("style_profiles").upsert({
       user_id: user.id,
       everyday_style: answers.everyday_style,
-      palette: Array.isArray(answers.palette) ? answers.palette.join(", ") : (answers.palette ?? null),
+      palette: Array.isArray(answers.palette) ? answers.palette.join(", ") : (answers.palette ?? "Neutrals"),
       dress_code: answers.dress_code,
-      boldness: Math.round(Number(answers.boldness)),
+      boldness: answers.boldness === undefined ? 3 : Math.round(Number(answers.boldness)),
       budget_band: answers.budget_band,
       body_shape: answers.body_shape ?? null,
       fit_prefs: fitPrefs,
@@ -120,7 +123,7 @@ Deno.serve(async (req) => {
       color_season: colorSeason,
       style_dna: styleDna,
       style_labels: labels,
-      quiz_version: 1,
+      quiz_version: 2,
     });
     if (upErr) throw upErr;
 

@@ -7,8 +7,7 @@ Set them with:
 supabase secrets set GEMINI_API_KEY=... FASHN_API_KEY=... INNGEST_EVENT_KEY=... \
   INNGEST_SIGNING_KEY=... SHOPSTYLE_KEY=... SKIMLINKS_PUB_ID=... \
   REVENUECAT_WEBHOOK_SECRET=... STRIPE_SECRET=... STRIPE_WEBHOOK_SECRET=... \
-  RESEND_KEY=... ALLOW_SYNC_RENDER=false \
-  PINTEREST_APP_ID=... PINTEREST_APP_SECRET=... PINTEREST_TOKEN_KEY=...
+  RESEND_KEY=... ALLOW_SYNC_RENDER=false
 supabase secrets set --env-file ./supabase/.env  # alternative
 ```
 
@@ -31,9 +30,6 @@ supabase secrets set --env-file ./supabase/.env  # alternative
 | `STRIPE_SECRET` | server | packs/real-worldSvcs | Stripe exempt from IAP (build pack §1) |
 | `STRIPE_WEBHOOK_SECRET` | server | billing webhook | verifies `Stripe-Signature` |
 | `RESEND_KEY` | server | trial/win-back email | Day-5 reminder, D+3/D+30 offers |
-| `PINTEREST_APP_ID` | server | pinterest-auth | Pinterest app client id (OAuth + Basic-auth token exchange) |
-| `PINTEREST_APP_SECRET` | server | pinterest-auth | NEVER leaves the edge (token exchange + revoke only) |
-| `PINTEREST_TOKEN_KEY` | server | pinterest-auth/sync/share | 32+ random bytes (base64) — AES-GCM key for stored OAuth tokens + HMAC key for OAuth state; rotate = users reconnect |
 | `ALLOW_SYNC_RENDER` | server | render-tryon | `false` in prod; `true` for local dev |
 | `APPLE_BUNDLE_ID` | server (opt, set it) | billing-apple | expected `bundleId` in App Store v2 notices; unset = check skipped (warn) |
 | `ANDROID_PACKAGE_NAME` | server (opt, set it) | billing-google | expected RTDN `packageName`; unset = check skipped (warn) |
@@ -58,34 +54,12 @@ auto-injected `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY`. The Sunday/Monday
 crons (supabase/inngest.md) call `POST /functions/v1/reel-drop` with the
 service_role key — server only, never the client anon key.
 
-## Taste autopilot (no new secrets)
-
-`taste-build` rides existing secrets only — no new env required. Required at
-runtime: auto-injected `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY`,
-`INNGEST_SIGNING_KEY` (verifies the `?build=1` cron worker AND signs the
-inline `pinterest-sync?sync=1` call — same HMAC both directions), and the
-`PINTEREST_APP_ID` / `PINTEREST_APP_SECRET` / `PINTEREST_TOKEN_KEY` trio for
-the sync path it reuses. The tag extractor is vocab-based ($0, no LLM), so no
-`GEMINI_API_KEY` is needed on this path. The Sunday/Monday crons
-(supabase/inngest.md) call `POST /functions/v1/taste-build?build=1` with the
-service_role key — server only, never the client anon key.
-
-## Pinterest inspiration (OAuth user tokens, encrypted at rest)
-
-Redirect URI (register in the Pinterest app dashboard AND the client deep
-link): `vai://pinterest-callback`.
-
-- Trial apps see sandbox-only data (fine for dev); the 1000 req/day app-wide
-  budget is guarded in-code (`app_config.pinterest_budget`, cap 800 — see
-  `functions/_shared/pinterest.ts`). Standard tier needs the video-demo
-  review; per-minute limits (org_read 1000/min, org_write 300/100) are handled
-  by 429 + Retry-After backoff, no new secrets.
-- `boards:secret` / `pins:secret` are requested ONLY when the user opts in
-  (`?with_secret=1`); `pins:write` ONLY on the share sheet's explicit opt-in
-  (`?with_write=1`). Stored per user in `pinterest_accounts.scopes`.
-- Generate the token key with: `openssl rand -base64 32`. Rotation: set the
-  new key → `functions deploy` → existing rows fail decrypt → users reconnect
-  (fail closed, never plaintext fallback).
+> REMOVED (Pinterest strip): the Taste-autopilot and Pinterest-inspiration
+> sections below were deleted with the feature. `taste-build`,
+> `pinterest-sync`, and the nightly Pinterest/taste crons in
+> supabase/inngest.md are dead — pause the crons and delete those functions
+> before the next deploy, or a nightly job burns edge invocations for zero
+> users.
 
 ## Webhook endpoints
 

@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/theme';
+import { MeshGradient } from '@/components/MeshGradient';
 import { api } from '@/lib/api';
 import { useSession } from '@/store/session';
 import { track } from '@/lib/analytics';
@@ -103,10 +104,11 @@ export default function PaywallScreen() {
 
   return (
     <ScrollView
-      style={[styles.root, { backgroundColor: colors.background }]}
+      style={[styles.root, { backgroundColor: 'transparent' }]}
       contentContainerStyle={styles.content}
       testID="paywall-screen"
     >
+      <MeshGradient variant="auth" />
       <Text style={[styles.kicker, { color: colors.muted }]}>You have seen the magic. Keep it.</Text>
       <Text style={[styles.title, { color: colors.text }]}>Your closet, styled daily</Text>
 
@@ -243,17 +245,40 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   content: { padding: 24, paddingTop: 64, paddingBottom: 32 },
   kicker: { fontSize: 13, fontWeight: '700' },
-  title: { fontSize: 30, fontWeight: '800', fontFamily: 'Georgia', marginTop: 8 },
-  counter: { borderRadius: 14, padding: 16, marginTop: 20, gap: 6 },
-  counterText: { fontSize: 18, fontWeight: '800' },
+  // The money moment gets the serif — commitment should feel like an atelier.
+  title: { fontSize: 31, lineHeight: 37, fontWeight: '700', fontFamily: 'PlayfairDisplay_700Bold', letterSpacing: -0.2, marginTop: 8 },
+  counter: {
+    borderRadius: 18,
+    padding: 16,
+    marginTop: 20,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: '#EFEAF9',
+    shadowColor: '#44307E',
+    shadowOpacity: 0.09,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 2,
+  },
+  counterText: { fontSize: 20, lineHeight: 26, fontWeight: '700', fontFamily: 'PlayfairDisplay_700Bold' },
   counterSub: { fontSize: 13, lineHeight: 18 },
   perks: { gap: 8, marginTop: 20 },
   perk: { fontSize: 15 },
   plansRow: { flexDirection: 'row', gap: 10, marginTop: 20 },
-  planCard: { flex: 1, borderRadius: 12, padding: 14, gap: 2 },
+  planCard: { flex: 1, borderRadius: 16, padding: 14, gap: 2 },
   planTitle: { fontSize: 13, fontWeight: '700' },
-  planPrice: { fontSize: 17, fontWeight: '800' },
-  button: { borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 24 },
+  planPrice: { fontSize: 18, fontWeight: '700', fontFamily: 'Poppins_700Bold' },
+  button: {
+    borderRadius: 999,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginTop: 24,
+    shadowColor: '#6645D9',
+    shadowOpacity: 0.34,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 7 },
+    elevation: 5,
+  },
   buttonText: { fontSize: 16, fontWeight: '700' },
   trial: { fontSize: 13, textAlign: 'center', marginTop: 10 },
   plans: { fontSize: 12, textAlign: 'center', marginTop: 6, lineHeight: 18 },

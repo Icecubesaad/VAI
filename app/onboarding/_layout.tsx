@@ -1,6 +1,6 @@
 import { Stack } from 'expo-router';
 
-/** Onboarding funnel: carousel → auth → quiz(5) → selfie → closet-min3 → first-outfit → paywall. */
+/** Onboarding funnel: carousel → auth → quiz(4) → selfie → closet-min3 → first-outfit → paywall. */
 export default function OnboardingLayout() {
   return (
     <Stack screenOptions={{ headerShown: false }}>

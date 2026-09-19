@@ -48,13 +48,6 @@ export const ANALYTICS_EVENTS = [
   'reel_card_regenerated',
   'reel_wear_it_today',
   'reel_shop_tap',
-  // Pinterest taste graph (contract §10) — NOT core funnel.
-  'pinterest_connected',
-  'pinterest_disconnected',
-  'boards_synced',
-  'pose_mode_selected',
-  'taste_seed_applied',
-  'pin_shared',
 ] as const;
 export type AnalyticsEvent = (typeof ANALYTICS_EVENTS)[number];
 
@@ -120,12 +113,6 @@ export interface AnalyticsPropsMap {
   reel_card_regenerated: BaseProps & { card_index?: number; pose?: ReelPose; render_id?: string; cost_usd: number };
   reel_wear_it_today: BaseProps & { date?: string; pose?: ReelPose };
   reel_shop_tap: BaseProps & { product_id?: string; retailer?: string; card_index?: number };
-  pinterest_connected: BaseProps & { source?: string };
-  pinterest_disconnected: BaseProps;
-  boards_synced: BaseProps & { count: number };
-  pose_mode_selected: BaseProps & { pose_mode: 'keep' | 'adapt'; render_id?: string };
-  taste_seed_applied: BaseProps & { seed_count: number; board?: string };
-  pin_shared: BaseProps & { render_id?: string };
 }
 
 // ------------------------------------------------------- client
