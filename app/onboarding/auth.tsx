@@ -29,6 +29,7 @@ import { useQuotas } from '@/store/quotas';
 import { api } from '@/lib/api';
 import { initAnalytics } from '@/lib/analytics';
 import { setSentryUser } from '@/lib/sentry';
+import { requestTrackingPermissionsAsync } from 'expo-tracking-transparency';
 
 const PRIVACY_URL = 'https://vai.style/privacy';
 const APP_NAME = 'VAI Stylist';
@@ -142,6 +143,11 @@ export default function AuthScreen() {
       useSession.getState().setFunnelOwner(userId);
       setSentryUser(userId);
       void initAnalytics(userId, 'free').catch(() => undefined);
+      // ATT prompt (iOS): requested in-context post sign-up, never at cold
+      // launch — and required before any future IDFA-based attribution.
+      if (Platform.OS === 'ios') {
+        void requestTrackingPermissionsAsync().catch(() => undefined);
+      }
       const parentalConsentAt = gate
         ? gate.ageBand === 'p13_17' && gate.parentalConsent
           ? new Date().toISOString()

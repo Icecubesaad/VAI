@@ -15,6 +15,8 @@ import { MeshGradient } from '@/components/MeshGradient';
 import { PressScale } from '@/components/PressScale';
 import { useReducedMotion } from '@/lib/motion';
 import { useSession } from '@/store/session';
+import { track } from '@/lib/analytics';
+import { markOnboardStart, once as growthOnce } from '@/lib/growth';
 import teeFlat from '@/assets/onboarding/tee-flat.jpg';
 import teeFold from '@/assets/onboarding/tee-fold.jpg';
 import teeHanger from '@/assets/onboarding/tee-hanger.jpg';
@@ -108,6 +110,15 @@ export default function OnboardingCarousel() {
   const slideShift = slideAnim.interpolate({ inputRange: [0, 1], outputRange: [32, 0] });
 
   const goAuth = useCallback(() => {
+    markOnboardStart();
+    // Funnel opening event — once per install; source splits referral vs organic.
+    if (growthOnce('onboardStarted')) {
+      track('onboard_started', {
+        user_id: useSession.getState().userId ?? 'anonymous',
+        tier: 'free',
+        source: useSession.getState().referredBy ? 'referral' : 'organic',
+      });
+    }
     setStep('auth');
     router.replace('/onboarding/auth');
   }, [router, setStep]);

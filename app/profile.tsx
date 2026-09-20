@@ -1,14 +1,17 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Linking,
+  Share,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import * as Sharing from 'expo-sharing';
+import type { ViewShotRef } from 'react-native-view-shot';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -21,10 +24,13 @@ import * as Notifications from 'expo-notifications';
 import { clearAllOnLogout } from '@/lib/perf';
 import { useSession } from '@/store/session';
 import { useCloset } from '@/store/closet';
-import { usePaywall } from '@/store/paywall';
+import { usePaywall } from '@/store/paywall'
+import { useQuiz } from '@/store/quiz';
+import { track } from '@/lib/analytics';
+import { buildWatermarkText } from '@/lib/watermark';
+import { ShareDNA, captureShareDNA } from '@/components';
 import { useQuotas } from '@/store/quotas';
 import { useReel } from '@/store/reel';
-import { useQuiz } from '@/store/quiz';
 
 const PRIVACY_URL = 'https://vai.style/privacy';
 
@@ -47,6 +53,37 @@ export default function ProfileScreen() {
   const [busy, setBusy] = useState<'photos' | 'account' | 'logout' | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [doneMessage, setDoneMessage] = useState<string | null>(null);
+  const [sharing, setSharing] = useState(false);
+  const quizResult = useQuiz((s) => s.result);
+  const shareDnaRef = useRef<ViewShotRef | null>(null);
+
+  // Growth loop: the shareable DNA card. Every export carries the referral
+  // watermark (vai.style/r/<code>), so each share is an invite.
+  const handleShareDna = useCallback(async () => {
+    const code = useSession.getState().referralCode;
+    if (!code) return;
+    setSharing(true);
+    try {
+      const uri = await captureShareDNA(shareDnaRef);
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, {
+          mimeType: 'image/jpeg',
+          dialogTitle: 'Share my VAI Style DNA',
+        });
+      } else {
+        await Share.share({ message: buildWatermarkText(code) });
+      }
+      track('referral_sent', {
+        user_id: useSession.getState().userId ?? 'anonymous',
+        tier: usePaywall.getState().tier === 'free' ? 'free' : 'premium',
+        code,
+      });
+    } catch {
+      // Share cancelled or unavailable — silent, never blocks the profile.
+    } finally {
+      setSharing(false);
+    }
+  }, []);
 
   const scoreQuery = useQuery({ queryKey: ['style-score'], queryFn: () => api.styleScore() });
 
@@ -216,11 +253,40 @@ export default function ProfileScreen() {
         </Text>
       )}
 
+      {/* Shareable Style DNA — the referral invite surface (GTM growth loop). */}
+      {!!referralCode && (
+        <View style={styles.shareSection} testID="share-dna-section">
+          <ShareDNA
+            ref={shareDnaRef}
+            name={email ? email.split('@')[0] : undefined}
+            styleLabels={quizResult?.labels ?? []}
+            colorSeason={quizResult?.colorSeason ?? null}
+            referralCode={referralCode}
+            testID="share-dna-card"
+          />
+          <Pressable
+            style={[styles.shareButton, { backgroundColor: tokenColors.ink }]}
+            onPress={() => void handleShareDna()}
+            disabled={sharing}
+            testID="share-dna"
+            accessibilityRole="button"
+            accessibilityLabel="Share my Style DNA card with my invite link"
+          >
+            <Text style={styles.shareButtonText}>
+              {sharing ? 'Preparing card…' : 'Share my Style DNA'}
+            </Text>
+          </Pressable>
+          <Text style={[styles.shareHint, { color: colors.muted }]}>
+            Every card carries your invite link — friends get a free month.
+          </Text>
+        </View>
+      )}
+
       {/* Subscription — the violet lacquer card. Premium/trial read as owned;
           free reads as the upgrade invitation. */}
       <Pressable
         style={styles.subCard}
-        onPress={() => router.push('/onboarding/paywall')}
+        onPress={() => router.push({ pathname: '/onboarding/paywall', params: { placement: 'profile' } })}
         testID="subscription-row"
         accessibilityRole="button"
       >
@@ -338,6 +404,17 @@ const styles = StyleSheet.create({
   statLabel: { fontSize: 11.5, lineHeight: 15, fontWeight: '600' },
   statDivider: { width: 1, backgroundColor: '#E6E0F5', marginVertical: 6 },
   statNote: { fontSize: 12.5, lineHeight: 18, textAlign: 'center', marginTop: 10 },
+  shareSection: {
+    marginTop: 24,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#E6E0F5',
+    padding: 14,
+    gap: 12,
+  },
+  shareButton: { borderRadius: 999, paddingVertical: 12, alignItems: 'center' },
+  shareButtonText: { color: '#FAF9FE', fontWeight: '700', fontSize: 14 },
+  shareHint: { fontSize: 12, lineHeight: 17, textAlign: 'center' },
 
   // Subscription — the violet lacquer card.
   subCard: {

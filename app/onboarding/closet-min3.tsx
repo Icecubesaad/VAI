@@ -14,6 +14,7 @@ import { compressGarmentPhoto, ImagePipelineError } from '@/lib/perf/image-pipel
 import { api, ApiError, apiErrorCopy, type Garment } from '@/lib/api';
 import { useCloset, selectClosetCount, CLOSET_MIN_COUNT, FREE_CLOSET_CAP } from '@/store/closet';
 import { useSession } from '@/store/session';
+import { track } from '@/lib/analytics';
 import { usePaywall } from '@/store/paywall';
 
 /**
@@ -147,6 +148,13 @@ export default function ClosetMin3() {
         const before = useCloset.getState().order.length;
         upsert(garment);
         setLastSync(new Date().toISOString());
+        // Funnel step event: per-add provenance feeds closet-building drop-off.
+        track('closet_item_added', {
+          user_id: userId,
+          tier: 'free',
+          count: useCloset.getState().order.length,
+          source,
+        });
         // Success confirmation: crossing the 3-item threshold earns the done
         // tick (Continue unlocks); other adds get a quiet select tick.
         if (before < CLOSET_MIN_COUNT && useCloset.getState().order.length >= CLOSET_MIN_COUNT) {

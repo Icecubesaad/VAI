@@ -391,6 +391,15 @@ export default function ReelScreen() {
   // the studio falls back to garment_refs when it is absent).
   const handleTry = useCallback(
     (card: ReelCardData) => {
+      // Wear-intent: the canonical "wear it today" moment (CONTRACT §10).
+      const uid = useSession.getState().userId;
+      if (uid) {
+        track('reel_wear_it_today', {
+          user_id: uid,
+          tier: toAnalyticsTier(usePaywall.getState().tier),
+          date: new Date().toISOString().slice(0, 10),
+        });
+      }
       router.push({
         pathname: '/(tabs)/tryon',
         params: {
@@ -419,7 +428,7 @@ export default function ReelScreen() {
         'reel_regenerate',
       );
       setRegenTarget(null);
-      router.push('/onboarding/paywall');
+      router.push({ pathname: '/onboarding/paywall', params: { placement: 'reel_regenerate' } });
       return;
     }
     if (useReel.getState().regeneratesLeft() <= 0) {
@@ -470,7 +479,7 @@ export default function ReelScreen() {
         paywall.tier === 'free' ? 'free_lifetime_exhausted' : 'monthly_exhausted',
         'reel_style_week',
       );
-      router.push('/onboarding/paywall');
+      router.push({ pathname: '/onboarding/paywall', params: { placement: 'reel_style_week' } });
       return;
     }
     setBanner(null);

@@ -27,7 +27,8 @@ export const badSignature = (message = "Invalid webhook signature") =>
 export const notConfigured = (name: string) =>
   new HttpError(500, "not_configured", `Webhook secret missing: ${name}`);
 
-const enc = (s: string): Uint8Array => new TextEncoder().encode(s);
+// Typed as ArrayBuffer-backed so Deno 2's stricter BufferSource accepts it.
+const enc = (s: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(s);
 
 /** Constant-time string compare (webhook secrets, Stripe v1 digests). */
 export function timingSafeEqual(a: string, b: string): boolean {
