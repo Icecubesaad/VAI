@@ -1,16 +1,18 @@
 // AI callers (Deno, strict TS) — routed through OpenRouter.
 // Founder-mandated routing (Sep 2026):
-//   TEXT  → `deepseek/deepseek-v4-flash-0731`, provider pinned to `baidu/fp8`,
-//           fallbacks OFF (request-level `provider.only`, never a different host).
+//   TEXT+VISION → `z-ai/glm-5.3-flash` (vision-capable — deepseek is not),
+//           providers pinned to `gmicloud/fp8` + `deepinfra/fp4` with
+//           fallbacks ON so the two can fail over (request-level
+//           `provider.only`, never a different host).
 //   IMAGE → `google/gemini-3.1-flash-image` via OpenRouter chat-completions
 //           multimodal output (choices[0].message.images[]).
 // All server-side only — OPENROUTER_API_KEY never leaves Edge Function secrets.
 // The FASHN fallback chain in pipeline.ts still applies BELOW this layer.
 
-export const OR_TEXT_MODEL = Deno.env.get("OR_TEXT_MODEL") ?? "deepseek/deepseek-v4-flash-0731";
+export const OR_TEXT_MODEL = Deno.env.get("OR_TEXT_MODEL") ?? "z-ai/glm-5.3-flash";
 export const OR_IMAGE_MODEL = Deno.env.get("OR_IMAGE_MODEL") ?? "google/gemini-3.1-flash-image";
-/** Founder pin: this exact provider, no fallbacks. */
-const TEXT_PROVIDER_PIN = { only: ["baidu/fp8"], allow_fallbacks: false } as const;
+/** Founder pin: these two providers, fail over between them. */
+const TEXT_PROVIDER_PIN = { only: ["gmicloud/fp8", "deepinfra/fp4"], allow_fallbacks: true } as const;
 
 // Kept for the cost ledger + pipeline labels (USD per successful render).
 export const GEMINI_STD_COST_USD = 0.067;

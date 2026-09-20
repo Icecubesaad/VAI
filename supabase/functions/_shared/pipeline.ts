@@ -14,7 +14,7 @@ import { HttpError } from "./http.ts";
 import { logRenderCost, todaySpendUsd } from "./ledger.ts";
 import { pushToUser, renderFailedPush, renderReadyPush } from "./push.ts";
 import { refundAllowance, type PoolCode } from "./quota.ts";
-import { signedAssetUrl } from "./storage.ts";
+import { signedAssetUrl, signedRenderUrl } from "./storage.ts";
 
 export const MAX_ATTEMPTS = 3;
 const EST_STD_USD = 0.075;
@@ -112,24 +112,30 @@ export async function enqueueRender(
   }).select("id,status").single<{ id: string; status: string }>();
   if (error) throw error;
 
-  try {
-    await fireRenderRequested(data.id, input.userId);
-  } catch (e) {
-    // P1-7: never leave a reusable `queued` row nothing will ever process —
-    // the client would cache-hit it forever and the allowance would be gone.
-    // Refund the allowance and remove the row so a retry starts clean.
-    console.error("[pipeline] Inngest enqueue failed — refunding", {
-      renderId: data.id,
-      userId: input.userId,
-      error: (e as Error).message,
-    });
-    await refundAllowance(sb, input.userId, input.pool);
-    await sb.from("renders").delete().eq("id", data.id);
-    throw new HttpError(
-      503,
-      "render_queue_unavailable",
-      "The render queue is momentarily unreachable — try again in a moment.",
-    );
+  // RENDER_INLINE=true (dev / pre-Inngest deployments): skip the queue — the
+  // caller processes the render inline. With Inngest, enqueue as before.
+  if (Deno.env.get("RENDER_INLINE") !== "true") {
+    try {
+      await fireRenderRequested(data.id, input.userId);
+    } catch (e) {
+      // P1-7: never leave a reusable `queued` row nothing will ever process —
+      // the client would cache-hit it forever and the allowance would be gone.
+      // Refund the allowance and remove the row so a retry starts clean.
+      console.error("[pipeline] Inngest enqueue failed — refunding", {
+        renderId: data.id,
+        userId: input.userId,
+        error: (e as Error).message,
+      });
+      await refundAllowance(sb, input.userId, input.pool);
+      await sb.from("renders").delete().eq("id", data.id);
+      throw new HttpError(
+        503,
+        "render_queue_unavailable",
+        "The render queue is momentarily unreachable — try again in a moment.",
+      );
+    }
+  } else {
+    console.log("[pipeline] RENDER_INLINE — skipping Inngest enqueue", { renderId: data.id });
   }
   return data;
 }
