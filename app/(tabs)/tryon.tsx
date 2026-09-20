@@ -30,12 +30,13 @@ import {
   type Garment,
 } from '@/lib/api';
 import { renderCostPropsFromResult, track } from '@/lib/analytics';
+import { maybeRequestReview, once as growthOnce } from '@/lib/growth';
 import { hapticFor } from '@/lib/haptics';
 import { createSignedBasePhotoUrl, supabase } from '@/lib/supabase';
 import { comboKey, comboLabel, buildCombos, type OutfitCombo } from '@/lib/outfit-combos';
 import { useSession } from '@/store/session';
 import { useCloset, selectClosetList } from '@/store/closet';
-import { useQuotas } from '@/store/quotas';
+import { MAX_RESTYLES_PER_SESSION, useQuotas } from '@/store/quotas';
 import { usePaywall } from '@/store/paywall';
 import { useReel } from '@/store/reel';
 import { useComboRenders } from '@/store/combos';
@@ -320,6 +321,19 @@ export default function TryOnScreen() {
                   latency_ms: Date.now() - startedAt,
                   ...(r.cached !== undefined ? { cached: r.cached } : {}),
                 });
+                if (growthOnce(`ahaTryon.${uid}`)) {
+                  track('aha_first_tryon', { user_id: uid, tier: aTier });
+                }
+                if (aTier !== 'free') {
+                  track('credits_consumed', {
+                    user_id: uid,
+                    tier: aTier,
+                    credits: 1,
+                    render_id: r.id,
+                    cost_usd: r.costUsd ?? 0,
+                  });
+                }
+                void maybeRequestReview();
               }
             } else if (r.status === 'failed') {
               stopPoll();
@@ -439,6 +453,19 @@ export default function TryOnScreen() {
             latency_ms: Date.now() - startedAt,
             ...(r.cached !== undefined ? { cached: r.cached } : {}),
           });
+          if (growthOnce(`ahaTryon.${uid}`)) {
+            track('aha_first_tryon', { user_id: uid, tier: aTier });
+          }
+          if (aTier !== 'free') {
+            track('credits_consumed', {
+              user_id: uid,
+              tier: aTier,
+              credits: 1,
+              render_id: r.id,
+              cost_usd: r.costUsd ?? 0,
+            });
+          }
+          void maybeRequestReview();
         }
       } else {
         setPhase('rendering');
@@ -449,6 +476,14 @@ export default function TryOnScreen() {
       // Restyle taps route to the EXISTING finished render (P1-4).
       if (mode === 'restyle' && job && job.status === 'done') {
         const note = restyleNote.trim().slice(0, 280);
+        if (uid) {
+          track('restyle_tapped', {
+            user_id: uid,
+            tier: aTier,
+            render_id: job.id,
+            restyle_n: MAX_RESTYLES_PER_SESSION - useQuotas.getState().restylesLeft() + 1,
+          });
+        }
         // Idempotency mirrors the server key inputs (render|note).
         const restyleKey = await Crypto.digestStringAsync(
           Crypto.CryptoDigestAlgorithm.SHA256,
@@ -516,7 +551,7 @@ export default function TryOnScreen() {
     } catch (e) {
       setPhase('failed');
       if (e instanceof ApiError && e.code === 'QUOTA_EXCEEDED') {
-        router.push('/onboarding/paywall');
+        router.push({ pathname: '/onboarding/paywall', params: { placement: 'tryon_quota' } });
         return;
       }
       setError(apiErrorCopy(e).message);

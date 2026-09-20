@@ -2,7 +2,7 @@ import '../global.css';
 // Dev-only web QA harness (no-ops outside __DEV__ + web with localStorage keys set).
 import '../lib/qa-bridge';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, AppState, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Stack, useRootNavigationState, useRouter } from 'expo-router';
 import * as Linking from 'expo-linking';
@@ -38,7 +38,8 @@ import {
 import { useSession } from '@/store/session';
 import { usePaywall } from '@/store/paywall';
 import { registerPushToken } from '@/lib/push';
-import { initAnalytics } from '@/lib/analytics';
+import { flushAnalytics, initAnalytics, track } from '@/lib/analytics';
+import { onboardDurationS, once as growthOnce, retentionPingIfDue } from '@/lib/growth';
 import { initSentry, setSentryUser } from '@/lib/sentry';
 
 // Perf loading recipe (CONTRACT-perf.md + APP-LOADING-SPLASH.md): mark launch
@@ -227,16 +228,11 @@ export default function RootLayout() {
   const setReferredBy = useSession((s) => s.setReferredBy);
 
   const routeReelWeek = useCallback(
-    (reelWeek: string) => {
-      // App already painted (warm push tap): route immediately, else stash.
-      if (readyRef.current) {
-        pendingReelRef.current = null;
-        router.push(
-          reelWeek ? { pathname: '/(tabs)/reel', params: { weekOf: reelWeek } } : '/(tabs)/reel',
-        );
-      } else {
-        pendingReelRef.current = reelWeek;
-      }
+    // Reel v2 will be a Pinterest-catalog moodboard (founder concept — no AI
+    // renders). Until it ships, reel/Monday-drop links land on home.
+    (_reelWeek: string) => {
+      pendingReelRef.current = null;
+      if (readyRef.current) void router.push('/(tabs)');
     },
     [router],
   );
@@ -244,7 +240,14 @@ export default function RootLayout() {
   const handleUrl = useCallback(
     (url: string) => {
       const code = extractReferralCode(url);
-      if (code) setReferredBy(code);
+      if (code) {
+        setReferredBy(code);
+        // Referral loop entry: fired once per install per code (PostHog
+        // stitches the anonymous id to the user at sign-up).
+        if (growthOnce(`refAccepted.${code}`)) {
+          track('referral_accepted', { user_id: 'anonymous', tier: 'free', code });
+        }
+      }
       const renderId = extractRenderId(url);
       if (renderId) pendingRenderRef.current = renderId;
       // Reel targets: `vai://reel` and the Monday-push `vai://outfit/<date>`.
@@ -274,6 +277,29 @@ export default function RootLayout() {
     [router],
   );
   usePushRouter(handlePushRoute, routeRenderResult);
+
+  // Funnel completion: setStep('done') fires from the paywall-success and
+  // first-outfit free paths. Once per user; duration measured from T0.
+  const onboardingStep = useSession((s) => s.onboardingStep);
+  useEffect(() => {
+    if (onboardingStep !== 'done') return;
+    const uid = useSession.getState().userId ?? 'anonymous';
+    if (!growthOnce(`onboardDone.${uid}`)) return;
+    const durationS = onboardDurationS();
+    track('onboard_completed', {
+      user_id: uid,
+      tier: usePaywall.getState().tier === 'free' ? 'free' : 'premium',
+      ...(durationS !== undefined ? { duration_s: durationS } : {}),
+    });
+  }, [onboardingStep]);
+
+  // Flush buffered PostHog events when the app leaves the foreground.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s !== 'active') void flushAnalytics();
+    });
+    return () => sub.remove();
+  }, []);
 
   // Supabase auth events → session store (boot-time session comes from the gate below).
   // Gated: without credentials there is no client to subscribe to.
@@ -355,6 +381,7 @@ export default function RootLayout() {
           // Fire-and-forget: permission prompt only on first run; the server
           // upsert (merge-duplicates) is idempotent on (user, token).
           void registerPushToken({ userId: u.id }).catch(() => undefined);
+          retentionPingIfDue(u.id, usePaywall.getState().tier === 'free' ? 'free' : 'premium');
         } else {
           // Ghost-funnel guard: persisted MMKV can resume mid-funnel (quiz /
           // selfie / closet / paywall) with no session — every backend call
@@ -404,14 +431,8 @@ export default function RootLayout() {
       if (renderId) {
         router.push({ pathname: '/(tabs)/tryon', params: { renderId } });
       }
-      // Monday push: land on the weekly reel (reel screen owns the fetch).
-      const reelWeek = pendingReelRef.current;
+      // Reel/Monday-push taps: the AI-render reel is paused (cost) — home.
       pendingReelRef.current = null;
-      if (!renderId && reelWeek !== null) {
-        router.push(
-          reelWeek ? { pathname: '/(tabs)/reel', params: { weekOf: reelWeek } } : '/(tabs)/reel',
-        );
-      }
     })();
   }, [routerMounted, handleUrl, router, bootTick, fontsLoaded]);
 
@@ -482,5 +503,5 @@ export default function RootLayout() {
 }
 
 const styles = StyleSheet.create({
-  boot: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FAF9FE' },
+  boot: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F4EFF2' },
 });

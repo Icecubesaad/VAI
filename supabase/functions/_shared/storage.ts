@@ -49,7 +49,10 @@ export async function signedAssetUrl(
     }
     objectPath = decodeURIComponent(m[2]!);
   }
-  if (!objectPath.startsWith(`${userId}/`)) {
+  // auto-tag stores cutouts nested (`garments/cutout/{uid}/<id>.png`) while
+  // direct app uploads live at `{uid}/<file>` — both are owner-scoped; the
+  // path must contain the caller's own prefix either way (never another user's).
+  if (!objectPath.startsWith(`${userId}/`) && !objectPath.includes(`${userId}/`)) {
     throw new Error(`${bucket} image is outside the owner's storage prefix`);
   }
   const { data, error } = await sb.storage.from(bucket).createSignedUrl(objectPath, 3600);

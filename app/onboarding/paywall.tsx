@@ -8,13 +8,20 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '@/theme';
 import { MeshGradient } from '@/components/MeshGradient';
 import { api } from '@/lib/api';
 import { useSession } from '@/store/session';
 import { track } from '@/lib/analytics';
 import { usePaywall } from '@/store/paywall';
+import {
+  BillingError,
+  CREDIT_PACKS,
+  initBilling,
+  purchaseCreditPack,
+  type CreditPack,
+} from '@/lib/billing';
 
 const TRIAL_COPY = '7 days free, then $4.99/mo · cancel anytime · no charge today';
 const YEARLY_TRIAL_COPY = '7 days free, then $39.99/yr · cancel anytime · no charge today';
@@ -46,9 +53,44 @@ export default function PaywallScreen() {
   const referredBy = useSession((s) => s.referredBy);
   const referralRedeemed = useSession((s) => s.referralRedeemed);
   const markRedeemed = useSession((s) => s.setReferralRedeemed);
+  // Deep-linked placements (vai://paywall?placement=) name WHERE the paywall
+  // opened from — every router.push below passes one; default is onboarding.
+  const params = useLocalSearchParams<{ placement?: string | string[] }>();
+  const placement = Array.isArray(params.placement)
+    ? params.placement[0]
+    : params.placement;
   // Plan parity with the upgrade sheet: monthly $4.99 + yearly $39.99 (best
   // value). Both carry the 7-day intro offer; the trial line names the plan.
   const [plan, setPlan] = useState<PaywallPlan>('yearly');
+  const [packBusy, setPackBusy] = useState<CreditPack['id'] | null>(null);
+  const [packError, setPackError] = useState<string | null>(null);
+
+  const onBuyPack = useCallback(
+    async (pack: CreditPack) => {
+      clearPurchaseError();
+      setPackError(null);
+      setPackBusy(pack.id);
+      try {
+        const uid = useSession.getState().userId;
+        if (uid) await initBilling(uid);
+        await purchaseCreditPack(pack.id);
+        track('credits_purchased', {
+          user_id: uid ?? 'anonymous',
+          tier: usePaywall.getState().tier === 'free' ? 'free' : 'premium',
+          pack_id: pack.id,
+          credits: pack.credits,
+        });
+        void fetchStatus();
+      } catch (e) {
+        if (!(e instanceof BillingError && e.userCancelled)) {
+          setPackError(e instanceof Error ? e.message : 'Could not complete the purchase — nothing was charged.');
+        }
+      } finally {
+        setPackBusy(null);
+      }
+    },
+    [clearPurchaseError, fetchStatus],
+  );
 
   const dismiss = useCallback(() => {
     setStep('done');
@@ -84,7 +126,7 @@ export default function PaywallScreen() {
     track('paywall_seen', {
       user_id: useSession.getState().userId ?? 'anonymous',
       tier: st.tier === 'free' ? 'free' : 'premium',
-      placement: 'onboarding',
+      placement: placement ?? 'onboarding',
       renders_left: st.rendersLeft,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -143,6 +185,34 @@ export default function PaywallScreen() {
           ),
         )}
       </View>
+
+      {/* Credit packs — HD renders + top-ups (HD tier is packs-only, iron law #2). */}
+      <View style={styles.packsRow} testID="credit-packs">
+        {CREDIT_PACKS.map((pack) => (
+          <Pressable
+            key={pack.id}
+            style={[styles.packCard, { borderColor: colors.border, borderWidth: 1 }]}
+            onPress={() => void onBuyPack(pack)}
+            disabled={packBusy !== null}
+            testID={`credit-pack-${pack.credits}`}
+            accessibilityRole="button"
+            accessibilityLabel={`${pack.hd ? '1 HD render' : `${pack.credits} renders`}, ${pack.priceDisplay}`}
+          >
+            <Text style={[styles.packTitle, { color: colors.text }]}>
+              {pack.hd ? '1 HD render' : `${pack.credits} renders`}
+            </Text>
+            <Text style={[styles.packPrice, { color: colors.muted }]}>{pack.priceDisplay}</Text>
+          </Pressable>
+        ))}
+      </View>
+      <Text style={[styles.plans, { color: colors.muted }]}>
+        Credit packs — HD renders and top-ups, billed once per purchase.
+      </Text>
+      {!!packError && (
+        <Text style={[styles.error, { color: colors.danger }]} testID="credit-pack-error">
+          {packError}
+        </Text>
+      )}
 
       {!!purchaseError && (
         <Text style={[styles.error, { color: colors.danger }]} testID="paywall-error">
@@ -253,8 +323,8 @@ const styles = StyleSheet.create({
     marginTop: 20,
     gap: 6,
     borderWidth: 1,
-    borderColor: '#EFEAF9',
-    shadowColor: '#44307E',
+    borderColor: '#F1E9ED',
+    shadowColor: '#3A2030',
     shadowOpacity: 0.09,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 5 },
@@ -264,6 +334,10 @@ const styles = StyleSheet.create({
   counterSub: { fontSize: 13, lineHeight: 18 },
   perks: { gap: 8, marginTop: 20 },
   perk: { fontSize: 15 },
+  packsRow: { flexDirection: 'row', gap: 10, marginTop: 20 },
+  packCard: { flex: 1, borderRadius: 16, padding: 14, gap: 2 },
+  packTitle: { fontSize: 13, fontWeight: '700' },
+  packPrice: { fontSize: 15, fontWeight: '700', fontFamily: 'Poppins_700Bold' },
   plansRow: { flexDirection: 'row', gap: 10, marginTop: 20 },
   planCard: { flex: 1, borderRadius: 16, padding: 14, gap: 2 },
   planTitle: { fontSize: 13, fontWeight: '700' },
@@ -273,7 +347,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     alignItems: 'center',
     marginTop: 24,
-    shadowColor: '#6645D9',
+    shadowColor: '#241820',
     shadowOpacity: 0.34,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 7 },

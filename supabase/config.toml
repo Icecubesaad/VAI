@@ -1,0 +1,10 @@
+# Supabase project config (CLI: link, deploy, secrets).
+# project_id is a local alias only — the linked ref lives in .temp/.
+project_id = "vai-stylist"
+
+# Provider-signed webhooks: bearer secret, never a Supabase JWT.
+[functions.billing-rc]
+verify_jwt = false
+
+[functions.affiliate-order]
+verify_jwt = false

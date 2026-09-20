@@ -315,7 +315,9 @@ export default function PlannerHome() {
               left={rendersLeft}
               cap={quotaCap}
               onPress={() => {
-                if (tier === 'free') router.push('/onboarding/paywall');
+                if (tier === 'free') {
+                  router.push({ pathname: '/onboarding/paywall', params: { placement: 'home' } });
+                }
               }}
             />
             <Pressable
@@ -821,7 +823,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
     padding: 14,
-    shadowColor: '#44307E',
+    shadowColor: '#3A2030',
     shadowOpacity: 0.08,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 4 },

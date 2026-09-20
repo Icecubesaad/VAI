@@ -13,6 +13,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.vai.stylist",
+      "associatedDomains": ["applinks:vai.style"],
       "infoPlist": {
         "NSCameraUsageDescription": "VAI uses your camera to photograph garments and your mirror selfie for try-ons only. Photos are never public without your opt-in.",
         "NSPhotoLibraryUsageDescription": "VAI imports garment photos you choose, to build your digital closet.",
@@ -23,12 +24,20 @@
       "package": "com.vai.stylist",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#FAF9FE"
+        "backgroundColor": "#F4EFF2"
       },
       "permissions": [
         "CAMERA",
         "READ_MEDIA_IMAGES",
         "POST_NOTIFICATIONS"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [{ "scheme": "https", "host": "vai.style", "pathPrefix": "/r" }],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
       ]
     },
     "plugins": [
@@ -39,7 +48,7 @@
         {
           "image": "./assets/splash.png",
           "resizeMode": "contain",
-          "backgroundColor": "#FAF9FE"
+          "backgroundColor": "#F4EFF2"
         }
       ],
       [
@@ -51,7 +60,9 @@
       ],
       "expo-image",
       "@sentry/react-native",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-sharing",
+      "expo-tracking-transparency"
     ],
     "experiments": {
       "typedRoutes": true

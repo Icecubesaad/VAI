@@ -8,13 +8,13 @@
 // push with keep-best. Failed predictions always cost the user 0.
 
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { GEMINI_FLASH_IMAGE, GEMINI_PRO_IMAGE, GEMINI_STD_COST_USD, generateImage } from "./gemini.ts";
+import { OR_IMAGE_MODEL, GEMINI_STD_COST_USD, generateImage } from "./gemini.ts";
 import { FASHN_MAX_COST_USD, FASHN_STD_COST_USD, pollToDone, runTryon } from "./fashn.ts";
 import { HttpError } from "./http.ts";
 import { logRenderCost, todaySpendUsd } from "./ledger.ts";
 import { pushToUser, renderFailedPush, renderReadyPush } from "./push.ts";
 import { refundAllowance, type PoolCode } from "./quota.ts";
-import { signedAssetUrl } from "./storage.ts";
+import { signedAssetUrl, signedRenderUrl } from "./storage.ts";
 
 export const MAX_ATTEMPTS = 3;
 const EST_STD_USD = 0.075;
@@ -112,24 +112,30 @@ export async function enqueueRender(
   }).select("id,status").single<{ id: string; status: string }>();
   if (error) throw error;
 
-  try {
-    await fireRenderRequested(data.id, input.userId);
-  } catch (e) {
-    // P1-7: never leave a reusable `queued` row nothing will ever process —
-    // the client would cache-hit it forever and the allowance would be gone.
-    // Refund the allowance and remove the row so a retry starts clean.
-    console.error("[pipeline] Inngest enqueue failed — refunding", {
-      renderId: data.id,
-      userId: input.userId,
-      error: (e as Error).message,
-    });
-    await refundAllowance(sb, input.userId, input.pool);
-    await sb.from("renders").delete().eq("id", data.id);
-    throw new HttpError(
-      503,
-      "render_queue_unavailable",
-      "The render queue is momentarily unreachable — try again in a moment.",
-    );
+  // RENDER_INLINE=true (dev / pre-Inngest deployments): skip the queue — the
+  // caller processes the render inline. With Inngest, enqueue as before.
+  if (Deno.env.get("RENDER_INLINE") !== "true") {
+    try {
+      await fireRenderRequested(data.id, input.userId);
+    } catch (e) {
+      // P1-7: never leave a reusable `queued` row nothing will ever process —
+      // the client would cache-hit it forever and the allowance would be gone.
+      // Refund the allowance and remove the row so a retry starts clean.
+      console.error("[pipeline] Inngest enqueue failed — refunding", {
+        renderId: data.id,
+        userId: input.userId,
+        error: (e as Error).message,
+      });
+      await refundAllowance(sb, input.userId, input.pool);
+      await sb.from("renders").delete().eq("id", data.id);
+      throw new HttpError(
+        503,
+        "render_queue_unavailable",
+        "The render queue is momentarily unreachable — try again in a moment.",
+      );
+    }
+  } else {
+    console.log("[pipeline] RENDER_INLINE — skipping Inngest enqueue", { renderId: data.id });
   }
   return data;
 }
@@ -153,11 +159,12 @@ export function buildTryonPrompt(ctx: PromptCtx): string {
   ].filter(Boolean).join("; ");
   const lines = [
     "Photorealistic virtual try-on. Dress the person from the FIRST image (base photo) in the garment(s) from the reference image(s).",
-    "Hard constraints: preserve the person's face identity, skin tone, body shape and pose EXACTLY. Do not beautify, slim, age-shift, or change the background.",
+    "Hard constraints: preserve the person's face identity, skin tone and body shape. Do not beautify, slim, or age-shift.",
+    "POSE: give the subject a natural, confident editorial pose that suits the outfit and context — full body visible, weight shifted, hands relaxed. Interpret the pose freshly (never an exact copy of the base pose) unless the meta says pose:exact.",
     conditions ? `Match base-photo conditions — ${conditions}.` : null,
     ctx.mode === "compare"
       ? "Output ONE image, two panels side by side: LEFT = the untouched base photo, RIGHT = the try-on result. Thin neutral divider, no text."
-      : "Output ONLY the try-on result, same framing and aspect as the base photo.",
+      : "Output ONLY the try-on result on a flat solid white background — clean studio white, no props, no floor shadows.",
     ctx.priorFailTags.length > 0
       ? `Avoid these prior failures: ${ctx.priorFailTags.join("; ")}.`
       : null,
@@ -187,29 +194,25 @@ interface JobRow {
 function providerChain(tier: PipelineTier): string[] {
   // VERIFIED Sep-2026 (INTEGRATION-REPORT founder decision #1): Gemini is
   // PRIMARY for try-on, FASHN is fallback-only. Order per tier:
-  //   std → gemini-3.1-flash-image → gemini-3-pro-image → fashn-std
-  //   max → gemini-3-pro-image → gemini-3.1-flash-image → fashn-max
-  // Max leads with pro (not flash) on purpose: the caller spent an HD-pack
-  // credit for top fidelity, so the highest-fidelity Gemini model goes first;
-  // flash remains the safety fallback before FASHN. `model_hint` from the
+  //   std/max → google/gemini-3.1-flash-image (OpenRouter) → fashn-std/max
+  // One AI leg + FASHN: the founder's mandated image model IS the top
+  // fidelity leg; FASHN remains the safety fallback. `model_hint` from the
   // client is recorded in render meta for analytics but NEVER reorders this
   // chain — the server owns provider selection and cost attribution.
   return tier === "max"
-    ? [GEMINI_PRO_IMAGE, GEMINI_FLASH_IMAGE, "fashn-max"]
-    : [GEMINI_FLASH_IMAGE, GEMINI_PRO_IMAGE, "fashn-std"];
+    ? [OR_IMAGE_MODEL, "fashn-max"]
+    : [OR_IMAGE_MODEL, "fashn-std"];
 }
 
 function providerCostUsd(provider: string): number {
   if (provider === "fashn-max") return FASHN_MAX_COST_USD;
   if (provider === "fashn-std") return FASHN_STD_COST_USD;
-  // Lite primary ≈ $0.005/img; the (paid) flash-image fallback costs more.
-  if (provider === GEMINI_FLASH_IMAGE) return 0.005;
+  if (provider === OR_IMAGE_MODEL) return GEMINI_STD_COST_USD;
   return GEMINI_STD_COST_USD;
 }
 
 function providerLabel(provider: string): string {
-  if (provider === GEMINI_FLASH_IMAGE) return "gemini-flash-lite";
-  if (provider === GEMINI_PRO_IMAGE) return "gemini-flash";
+  if (provider === OR_IMAGE_MODEL) return "gemini-flash-image";
   return provider;
 }
 

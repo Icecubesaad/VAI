@@ -35,7 +35,8 @@ export default function ClosetScreen() {
     const topCat = Object.entries(byCat).sort((a, b) => b[1] - a[1])[0];
     const topColor = Object.entries(colorHits).sort((a, b) => b[1] - a[1])[0];
     if (!topCat) return null;
-    const catName = `${topCat[0]}${topCat[1] > 1 ? 's' : ''}`;
+    // "shoes" already plural — never "shoess".
+    const catName = topCat[1] > 1 && !topCat[0].endsWith('s') ? `${topCat[0]}s` : topCat[0];
     const hasRed = Object.keys(colorHits).some((c) => c.includes('red'));
     if (!topColor) return `Mostly ${catName} so far.`;
     const gap = hasRed ? '' : ' A red piece would stretch this closet.';
@@ -165,14 +166,14 @@ const styles = StyleSheet.create({
   // Serif display — the closet is the user's wardrobe atelier, not a database.
   title: { fontSize: 30, lineHeight: 36, fontWeight: '700', fontFamily: 'PlayfairDisplay_700Bold', letterSpacing: -0.2 },
   count: { fontSize: 13 },
-  rule: { height: 1, backgroundColor: '#E6E0F5', marginTop: 10, marginBottom: 4 },
+  rule: { height: 1, backgroundColor: '#E7DDE2', marginTop: 10, marginBottom: 4 },
   banner: {
     borderRadius: 16,
     padding: 14,
     marginTop: 12,
     borderWidth: 1,
-    borderColor: '#E6E0F5',
-    shadowColor: '#44307E',
+    borderColor: '#E7DDE2',
+    shadowColor: '#3A2030',
     shadowOpacity: 0.07,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 4 },
@@ -186,7 +187,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingVertical: 14,
     alignItems: 'center',
-    shadowColor: '#6645D9',
+    shadowColor: '#241820',
     shadowOpacity: 0.3,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 5 },

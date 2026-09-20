@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
@@ -11,6 +11,8 @@ import { useSession } from '@/store/session';
 import { useCloset, selectClosetList } from '@/store/closet';
 import { useQuiz } from '@/store/quiz';
 import { usePaywall, shouldTriggerPaywall } from '@/store/paywall';
+import { track } from '@/lib/analytics';
+import { once as growthOnce } from '@/lib/growth';
 
 /** Offline/AI-failure fallback: first 3 closet pieces + generic why-line. */
 const FALLBACK_WHY = 'Starter look from your first pieces — AI styling refines as your closet grows.';
@@ -49,6 +51,14 @@ export default function FirstOutfit() {
   );
   const showFallback = (outfitQuery.isError || (!outfitQuery.isPending && !outfit)) && fallbackImages.length > 0;
 
+  // Activation event: the first AI-styled outfit lands (the aha moment).
+  useEffect(() => {
+    const uid = useSession.getState().userId;
+    if (!uid || !(outfit || showFallback)) return;
+    if (!growthOnce(`ahaOutfit.${uid}`)) return;
+    track('aha_first_outfit', { user_id: uid, tier: 'free' });
+  }, [outfit, showFallback]);
+
   const goBack = useCallback(() => {
     setStep('closet');
     router.replace('/onboarding/closet-min3');
@@ -66,7 +76,7 @@ export default function FirstOutfit() {
     if (hit) {
       usePaywall.getState().setPlacement('first_outfit');
       setStep('paywall');
-      router.replace('/onboarding/paywall');
+      router.replace({ pathname: '/onboarding/paywall', params: { placement: 'first_outfit' } });
     } else {
       setStep('done');
       router.replace('/(tabs)');
@@ -178,7 +188,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     alignItems: 'center',
     marginBottom: 16,
-    shadowColor: '#6645D9',
+    shadowColor: '#241820',
     shadowOpacity: 0.34,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 7 },
