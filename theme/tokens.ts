@@ -82,24 +82,24 @@ export const colors = {
    * stop reading washed-out. Names kept (append-only contract) — terracotta
    * carries the violet workhorse, oxblood the deep-plum voice.
    */
-  paper: '#FAF9FE',
-  paperDeep: '#F1EDFB',
+  paper: '#F4EFF2',
+  paperDeep: '#ECE2E8',
   card: '#FFFFFF',
-  well: '#F0EBFA',
-  ink: '#211C33',
-  inkSoft: '#565170',
-  muted: '#8B84A6',
-  line: '#E6E0F5',
-  lineOnCard: '#EFEAF9',
+  well: '#F0E7EC',
+  ink: '#1D141C',
+  inkSoft: '#58474C',
+  muted: '#9A8B92',
+  line: '#E7DDE2',
+  lineOnCard: '#F1E9ED',
 
   /** Brand workhorse — glossed violet (CTAs, active states, selection rings) */
-  terracotta: '#7C5CE8',
-  terracottaDeep: '#6645D9',
-  terracottaWash: '#EDE7FE',
+  terracotta: '#3A2331',
+  terracottaDeep: '#241820',
+  terracottaWash: '#F3E5EC',
 
   /** Editorial lead — deep plum for kickers, DNA/share moments, value seals */
-  oxblood: '#4A2C92',
-  oxbloodWash: '#ECE5FB',
+  oxblood: '#6B2E44',
+  oxbloodWash: '#F5E3EA',
 
   /** Success / confirm — never decoration */
   sage: '#5FA777',
@@ -114,7 +114,7 @@ export const colors = {
   dangerWash: '#FBE1E6',
   warn: '#B28A1F',
 
-  appleBlack: '#16101F',
+  appleBlack: '#171014',
   applePaper: '#FFFFFF',
 
   /**
@@ -122,10 +122,10 @@ export const colors = {
    * bar — deep plum-black, never pure black: photos glow against it and the
    * white glass chrome keeps its violet cast.
    */
-  stage: '#120C22',
-  stageLift: '#1F1738',
+  stage: '#140D12',
+  stageLift: '#26181F',
 
-  scrim: 'rgba(33, 28, 51, 0.45)',
+  scrim: 'rgba(29, 20, 28, 0.45)',
 } as const;
 
 export type ColorName = keyof typeof colors;
@@ -216,21 +216,21 @@ export type RadiiName = keyof typeof radii;
  */
 export const shadows = {
   card: {
-    shadowColor: '#44307E',
+    shadowColor: '#3A2030',
     shadowOpacity: 0.09,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 5 },
     elevation: 2,
   },
   lift: {
-    shadowColor: '#44307E',
+    shadowColor: '#3A2030',
     shadowOpacity: 0.13,
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 9 },
     elevation: 4,
   },
   pop: {
-    shadowColor: '#3A2668',
+    shadowColor: '#2E1822',
     shadowOpacity: 0.22,
     shadowRadius: 26,
     shadowOffset: { width: 0, height: 13 },

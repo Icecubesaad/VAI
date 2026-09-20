@@ -324,7 +324,7 @@ const styles = StyleSheet.create({
     backgroundColor: tokenColors.ink,
     paddingVertical: 16,
     paddingHorizontal: 36,
-    shadowColor: '#211C33',
+    shadowColor: '#1D141C',
     shadowOpacity: 0.32,
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 9 },

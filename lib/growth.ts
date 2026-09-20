@@ -6,7 +6,6 @@
  * block or crash a flow (same law as analytics — events are evidence, not flow).
  */
 
-import * as StoreReview from 'expo-store-review';
 import { track } from './analytics';
 import { mmkvStorage } from '../store/mmkv';
 import type { SubTier } from './billing';
@@ -92,6 +91,8 @@ export async function maybeRequestReview(): Promise<void> {
     const n = noteRenderSuccess();
     if (n !== 3 && n !== 10) return;
     if (!once(`review.${n}`)) return;
+    // Lazy: expo-store-review has no web native module.
+    const StoreReview = await import('expo-store-review');
     if (!(await StoreReview.isAvailableAsync())) return;
     await StoreReview.requestReview();
   } catch {
