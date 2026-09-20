@@ -9,8 +9,9 @@
 import { decode as jpegDecode } from "npm:jpeg-js@0.4.4";
 import { PNG } from "npm:pngjs@7.0.0";
 
-const WHITE_THRESHOLD = 238; // per-channel: counts as "background white"
 const SOFT_ALPHA = 90; // 1px boundary feather
+const EDGE_ALPHA = 170; // 2nd-ring feather
+const MIN_REMOVED_FRACTION = 0.05; // below this the bg wasn't flat — keep original
 
 export function removeWhiteBackground(jpegBytes: Uint8Array): Uint8Array | null {
   try {
@@ -20,8 +21,26 @@ export function removeWhiteBackground(jpegBytes: Uint8Array): Uint8Array | null 
     const src = img.data as Uint8Array; // RGBA (jpeg-js alpha=255)
     const px = (x: number, y: number) => (y * w + x) * 4;
 
-    const isWhite = (i: number) =>
-      src[i] >= WHITE_THRESHOLD && src[i + 1] >= WHITE_THRESHOLD && src[i + 2] >= WHITE_THRESHOLD;
+    // Adaptive background model: the provider is prompted for a flat studio
+    // backdrop, but real output has gradients/vignettes — so we learn the
+    // border color cluster (mean + spread) instead of hardcoding white.
+    const samples: number[][] = [];
+    for (let x = 0; x < w; x += 2) {
+      for (const y of [0, h - 1]) samples.push([src[px(x, y)], src[px(x, y) + 1], src[px(x, y) + 2]]);
+    }
+    for (let y = 0; y < h; y += 2) {
+      for (const x of [0, w - 1]) samples.push([src[px(x, y)], src[px(x, y) + 1], src[px(x, y) + 2]]);
+    }
+    const mu = [0, 0, 0];
+    for (const s of samples) for (let c = 0; c < 3; c++) mu[c] += s[c];
+    for (let c = 0; c < 3; c++) mu[c] /= samples.length;
+    const sigma = [1, 1, 1];
+    for (const s of samples) for (let c = 0; c < 3; c++) sigma[c] += (s[c] - mu[c]) ** 2;
+    for (let c = 0; c < 3; c++) sigma[c] = Math.max(6, Math.sqrt(sigma[c] / samples.length) * 2.2);
+    const isBackground = (i: number) =>
+      Math.abs(src[i] - mu[0]) <= sigma[0] &&
+      Math.abs(src[i + 1] - mu[1]) <= sigma[1] &&
+      Math.abs(src[i + 2] - mu[2]) <= sigma[2];
 
     // BFS from every border pixel: border-connected white = background.
     const visited = new Uint8Array(w * h);
@@ -29,7 +48,7 @@ export function removeWhiteBackground(jpegBytes: Uint8Array): Uint8Array | null 
     for (let x = 0; x < w; x++) {
       for (const y of [0, h - 1]) {
         const idx = y * w + x;
-        if (!visited[idx] && isWhite(px(x, y))) {
+        if (!visited[idx] && isBackground(px(x, y))) {
           visited[idx] = 1;
           queue.push(idx);
         }
@@ -38,7 +57,7 @@ export function removeWhiteBackground(jpegBytes: Uint8Array): Uint8Array | null 
     for (let y = 0; y < h; y++) {
       for (const x of [0, w - 1]) {
         const idx = y * w + x;
-        if (!visited[idx] && isWhite(px(x, y))) {
+        if (!visited[idx] && isBackground(px(x, y))) {
           visited[idx] = 1;
           queue.push(idx);
         }
@@ -52,11 +71,20 @@ export function removeWhiteBackground(jpegBytes: Uint8Array): Uint8Array | null 
       for (const [nx, ny] of neighbors) {
         if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
         const nIdx = ny * w + nx;
-        if (!visited[nIdx] && isWhite(px(nx, ny))) {
+        if (!visited[nIdx] && isBackground(px(nx, ny))) {
           visited[nIdx] = 1;
           queue.push(nIdx);
         }
       }
+    }
+
+    let removed = 0;
+    for (let idx = 0; idx < visited.length; idx++) if (visited[idx]) removed++;
+    if (removed / (w * h) < MIN_REMOVED_FRACTION) {
+      console.error("[bgremove] background not flat enough — keeping original", {
+        removedFraction: Number((removed / (w * h)).toFixed(3)),
+      });
+      return null; // a half-cutout is worse than no cutout
     }
 
     const out = new PNG({ width: w, height: h });
@@ -67,13 +95,13 @@ export function removeWhiteBackground(jpegBytes: Uint8Array): Uint8Array | null 
         out.data[d] = src[s];
         out.data[d + 1] = src[s + 1];
         out.data[d + 2] = src[s + 2];
-        if (visited[y * w + x]) out.data[d + 3] = 0;
-        else if (
+        const bgNear =
           (x > 0 && visited[y * w + x - 1]) ||
           (x < w - 1 && visited[y * w + x + 1]) ||
           (y > 0 && visited[(y - 1) * w + x]) ||
-          (y < h - 1 && visited[(y + 1) * w + x])
-        ) {
+          (y < h - 1 && visited[(y + 1) * w + x]);
+        if (visited[y * w + x]) out.data[d + 3] = 0;
+        else if (bgNear) {
           out.data[d + 3] = SOFT_ALPHA; // feather the cut edge
         } else {
           out.data[d + 3] = 255;
