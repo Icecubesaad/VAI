@@ -35,7 +35,8 @@ export default function ClosetScreen() {
     const topCat = Object.entries(byCat).sort((a, b) => b[1] - a[1])[0];
     const topColor = Object.entries(colorHits).sort((a, b) => b[1] - a[1])[0];
     if (!topCat) return null;
-    const catName = `${topCat[0]}${topCat[1] > 1 ? 's' : ''}`;
+    // "shoes" already plural — never "shoess".
+    const catName = topCat[1] > 1 && !topCat[0].endsWith('s') ? `${topCat[0]}s` : topCat[0];
     const hasRed = Object.keys(colorHits).some((c) => c.includes('red'));
     if (!topColor) return `Mostly ${catName} so far.`;
     const gap = hasRed ? '' : ' A red piece would stretch this closet.';
