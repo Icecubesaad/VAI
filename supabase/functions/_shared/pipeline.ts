@@ -15,6 +15,7 @@ import { logRenderCost, todaySpendUsd } from "./ledger.ts";
 import { pushToUser, renderFailedPush, renderReadyPush } from "./push.ts";
 import { refundAllowance, type PoolCode } from "./quota.ts";
 import { signedAssetUrl, signedRenderUrl } from "./storage.ts";
+import { removeWhiteBackground } from "./bgremove.ts";
 
 export const MAX_ATTEMPTS = 3;
 const EST_STD_USD = 0.075;
@@ -159,11 +160,12 @@ export function buildTryonPrompt(ctx: PromptCtx): string {
   ].filter(Boolean).join("; ");
   const lines = [
     "Photorealistic virtual try-on. Dress the person from the FIRST image (base photo) in the garment(s) from the reference image(s).",
-    "Hard constraints: preserve the person's face identity, skin tone, body shape and pose EXACTLY. Do not beautify, slim, age-shift, or change the background.",
+    "Hard constraints: preserve the person's face identity, skin tone and body shape. Do not beautify, slim, or age-shift.",
+    "POSE: give the subject a natural, confident editorial pose that suits the outfit and context — full body visible, weight shifted, hands relaxed. Interpret the pose freshly (never an exact copy of the base pose) unless the meta says pose:exact.",
     conditions ? `Match base-photo conditions — ${conditions}.` : null,
     ctx.mode === "compare"
       ? "Output ONE image, two panels side by side: LEFT = the untouched base photo, RIGHT = the try-on result. Thin neutral divider, no text."
-      : "Output ONLY the try-on result, same framing and aspect as the base photo.",
+      : "Output ONLY the try-on result on a FLAT PURE WHITE background (#FFFFFF) — completely even studio white, no gradient, no floor, no walls, no props, no shadows on the background.",
     ctx.priorFailTags.length > 0
       ? `Avoid these prior failures: ${ctx.priorFailTags.join("; ")}.`
       : null,
@@ -368,7 +370,15 @@ export async function processRender(sb: SupabaseClient, renderId: string): Promi
       bytes = img.bytes;
     }
 
-    const outputPath = await uploadRender(sb, job.user_id, job.id, bytes);
+    // Founder requirement: renders carry the person on a fully transparent
+    // background. Providers return JPEG — strip the prompted white backdrop
+    // to PNG alpha (falls back to the original image on any failure).
+    let outputBytes = bytes;
+    if (provider !== "fashn-std" && provider !== "fashn-max") {
+      const transparent = removeWhiteBackground(bytes);
+      if (transparent) outputBytes = transparent;
+    }
+    const outputPath = await uploadRender(sb, job.user_id, job.id, outputBytes);
     const latencyMs = Date.now() - started;
     const costUsd = providerCostUsd(provider);
 

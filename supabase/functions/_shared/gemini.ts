@@ -10,7 +10,7 @@
 // The FASHN fallback chain in pipeline.ts still applies BELOW this layer.
 
 export const OR_TEXT_MODEL = Deno.env.get("OR_TEXT_MODEL") ?? "z-ai/glm-5.3-flash";
-export const OR_IMAGE_MODEL = Deno.env.get("OR_IMAGE_MODEL") ?? "google/gemini-3.1-flash-image";
+export const OR_IMAGE_MODEL = Deno.env.get("OR_IMAGE_MODEL") ?? "google/gemini-3.1-flash-lite-image";
 /** Founder pin: these two providers, fail over between them. */
 const TEXT_PROVIDER_PIN = { only: ["gmicloud/fp8", "deepinfra/fp4"], allow_fallbacks: true } as const;
 
