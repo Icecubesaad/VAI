@@ -228,16 +228,11 @@ export default function RootLayout() {
   const setReferredBy = useSession((s) => s.setReferredBy);
 
   const routeReelWeek = useCallback(
-    (reelWeek: string) => {
-      // App already painted (warm push tap): route immediately, else stash.
-      if (readyRef.current) {
-        pendingReelRef.current = null;
-        router.push(
-          reelWeek ? { pathname: '/(tabs)/reel', params: { weekOf: reelWeek } } : '/(tabs)/reel',
-        );
-      } else {
-        pendingReelRef.current = reelWeek;
-      }
+    // Reel v2 will be a Pinterest-catalog moodboard (founder concept — no AI
+    // renders). Until it ships, reel/Monday-drop links land on home.
+    (_reelWeek: string) => {
+      pendingReelRef.current = null;
+      if (readyRef.current) void router.push('/(tabs)');
     },
     [router],
   );
@@ -436,14 +431,8 @@ export default function RootLayout() {
       if (renderId) {
         router.push({ pathname: '/(tabs)/tryon', params: { renderId } });
       }
-      // Monday push: land on the weekly reel (reel screen owns the fetch).
-      const reelWeek = pendingReelRef.current;
+      // Reel/Monday-push taps: the AI-render reel is paused (cost) — home.
       pendingReelRef.current = null;
-      if (!renderId && reelWeek !== null) {
-        router.push(
-          reelWeek ? { pathname: '/(tabs)/reel', params: { weekOf: reelWeek } } : '/(tabs)/reel',
-        );
-      }
     })();
   }, [routerMounted, handleUrl, router, bootTick, fontsLoaded]);
 

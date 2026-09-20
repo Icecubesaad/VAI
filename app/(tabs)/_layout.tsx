@@ -50,15 +50,6 @@ export default function TabsLayout() {
         name="shop"
         options={{ title: 'Shop', tabBarIcon: ({ color, size }) => <Icon name="shop" color={color as string} size={size} /> }}
       />
-      <Tabs.Screen
-        name="reel"
-        options={{
-          // Hidden from the bar (founder call: the AI-render reel costs too much
-          // per user). Route stays alive for the v2 Pinterest-catalog rebuild —
-          // deep links (vai://reel, Monday push) still resolve if ever sent.
-          href: null,
-        }}
-      />
     </Tabs>
   );
 }
