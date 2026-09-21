@@ -23,7 +23,7 @@ export default function DnaPreviewScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#F4EFF2' },
+  root: { flex: 1, backgroundColor: '#141114' },
   content: { padding: 24, paddingTop: 64 },
   kicker: { fontSize: 13, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 1 },
   title: { fontSize: 30, fontWeight: '800', marginTop: 10 },

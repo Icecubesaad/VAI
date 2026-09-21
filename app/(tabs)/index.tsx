@@ -197,7 +197,7 @@ export default function PlannerHome() {
         onPress: () => {
           void hapticFor.select();
           router.push({
-            pathname: '/(tabs)/tryon',
+            pathname: '/tryon',
             params: {
               outfitId: outfit.id,
               garmentIds: outfit.garmentIds.join(','),
@@ -224,7 +224,7 @@ export default function PlannerHome() {
         onPress: () => {
           void hapticFor.select();
           router.push({
-            pathname: '/(tabs)/tryon',
+            pathname: '/tryon',
             params: { garmentIds: c.garmentIds.join(',') },
           });
         },
@@ -823,7 +823,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
     padding: 14,
-    shadowColor: '#3A2030',
+    shadowColor: '#000000',
     shadowOpacity: 0.08,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 4 },

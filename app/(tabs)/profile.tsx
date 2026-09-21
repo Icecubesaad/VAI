@@ -293,7 +293,7 @@ export default function ProfileScreen() {
         accessibilityRole="button"
       >
         <LinearGradient
-          colors={['#6B2E44', '#33161F']}
+          colors={['#D9A5A0', '#571C2C']}
           start={{ x: 0.15, y: 0 }}
           end={{ x: 0.85, y: 1 }}
           style={StyleSheet.absoluteFill}
@@ -397,25 +397,25 @@ const styles = StyleSheet.create({
   header: { fontSize: 34, lineHeight: 40, fontWeight: '700', fontFamily: 'PlayfairDisplay_700Bold', letterSpacing: -0.2 },
   email: { fontSize: 13, marginTop: 3 },
   // The atelier rule — same hairline as home + closet + shop.
-  headerRule: { height: 1, backgroundColor: '#E7DDE2', marginTop: 14, marginBottom: 20 },
+  headerRule: { height: 1, backgroundColor: '#2C252C', marginTop: 14, marginBottom: 20 },
 
   // Stat band — masthead numerals separated by hairlines, no boxes.
   statBand: { flexDirection: 'row', alignItems: 'stretch' },
   statCell: { flex: 1, alignItems: 'center', gap: 3, paddingVertical: 4 },
   statNum: { fontSize: 30, lineHeight: 34, fontWeight: '700', fontFamily: 'PlayfairDisplay_700Bold' },
   statLabel: { fontSize: 11.5, lineHeight: 15, fontWeight: '600' },
-  statDivider: { width: 1, backgroundColor: '#E7DDE2', marginVertical: 6 },
+  statDivider: { width: 1, backgroundColor: '#2C252C', marginVertical: 6 },
   statNote: { fontSize: 12.5, lineHeight: 18, textAlign: 'center', marginTop: 10 },
   shareSection: {
     marginTop: 24,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#E7DDE2',
+    borderColor: '#2C252C',
     padding: 14,
     gap: 12,
   },
   shareButton: { borderRadius: 999, paddingVertical: 12, alignItems: 'center' },
-  shareButtonText: { color: '#FDF8FA', fontWeight: '700', fontSize: 14 },
+  shareButtonText: { color: '#F3ECE4', fontWeight: '700', fontSize: 14 },
   shareHint: { fontSize: 12, lineHeight: 17, textAlign: 'center' },
 
   // Subscription — the violet lacquer card.
@@ -428,7 +428,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 14,
     overflow: 'hidden',
-    shadowColor: '#241820',
+    shadowColor: '#000000',
     shadowOpacity: 0.4,
     shadowRadius: 20,
     shadowOffset: { width: 0, height: 10 },
@@ -438,7 +438,7 @@ const styles = StyleSheet.create({
   subTitle: { color: '#FFFFFF', fontSize: 18, lineHeight: 23, fontWeight: '700', fontFamily: 'PlayfairDisplay_700Bold' },
   subBody: { color: 'rgba(255,255,255,0.82)', fontSize: 12.5, lineHeight: 17, marginTop: 3 },
   subPill: { borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.96)', paddingVertical: 9, paddingHorizontal: 15 },
-  subPillText: { color: '#6B2E44', fontSize: 13, fontWeight: '700', fontFamily: 'Poppins_600SemiBold' },
+  subPillText: { color: '#D9A5A0', fontSize: 13, fontWeight: '700', fontFamily: 'Poppins_600SemiBold' },
 
   row: {
     borderWidth: 1,
@@ -450,7 +450,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
-    shadowColor: '#3A2030',
+    shadowColor: '#000000',
     shadowOpacity: 0.06,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
@@ -463,10 +463,10 @@ const styles = StyleSheet.create({
 
   // Danger zone — one quiet sectioned group, hairline-divided, not red cards.
   dangerTitle: { fontSize: 12, fontWeight: '700', letterSpacing: 0.4, marginTop: 26, marginBottom: 8 },
-  dangerGroup: { borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#F1E9ED' },
+  dangerGroup: { borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#332B33' },
   dangerRow: { paddingVertical: 15, paddingHorizontal: 2 },
   dangerText: { fontSize: 14.5, fontWeight: '600' },
-  dangerDivider: { height: 1, backgroundColor: '#F1E9ED' },
+  dangerDivider: { height: 1, backgroundColor: '#332B33' },
 
   error: { fontSize: 13, marginTop: 8 },
   done: { fontSize: 13, marginTop: 8 },
@@ -477,7 +477,7 @@ const styles = StyleSheet.create({
     marginTop: 26,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#E7DDE2',
+    borderColor: '#2C252C',
   },
   logoutText: { fontSize: 15, fontWeight: '600' },
 });

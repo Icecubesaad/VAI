@@ -106,7 +106,7 @@ export const Button = memo(function Button({
           {/* Gloss: deep-base violet gradient + a hairline sheen at the top
               edge — the button reads lacquered, not flat. */}
           <LinearGradient
-            colors={['#4B2B3A', '#241820']}
+            colors={['#A63A4B', '#000000']}
             start={{ x: 0.2, y: 0 }}
             end={{ x: 0.8, y: 1 }}
             style={StyleSheet.absoluteFill}
@@ -124,7 +124,7 @@ export const Button = memo(function Button({
 
 const styles = StyleSheet.create({
   primaryDepth: {
-    shadowColor: '#241820',
+    shadowColor: '#000000',
     shadowOpacity: 0.38,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 6 },

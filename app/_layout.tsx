@@ -269,7 +269,7 @@ export default function RootLayout() {
   const routeRenderResult = useCallback(
     (renderId: string) => {
       if (readyRef.current) {
-        router.push({ pathname: '/(tabs)/tryon', params: { renderId } });
+        router.push({ pathname: '/tryon', params: { renderId } });
       } else {
         pendingRenderRef.current = renderId; // boot gate routes it post-paint
       }
@@ -429,7 +429,7 @@ export default function RootLayout() {
       const renderId = pendingRenderRef.current;
       pendingRenderRef.current = null;
       if (renderId) {
-        router.push({ pathname: '/(tabs)/tryon', params: { renderId } });
+        router.push({ pathname: '/tryon', params: { renderId } });
       }
       // Reel/Monday-push taps: the AI-render reel is paused (cost) — home.
       pendingReelRef.current = null;
@@ -493,6 +493,7 @@ export default function RootLayout() {
               <Stack.Screen name="index" />
               <Stack.Screen name="(tabs)" />
               <Stack.Screen name="profile" />
+              <Stack.Screen name="tryon" />
               <Stack.Screen name="onboarding" />
             </Stack>
           </QueryClientProvider>
@@ -503,5 +504,5 @@ export default function RootLayout() {
 }
 
 const styles = StyleSheet.create({
-  boot: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F4EFF2' },
+  boot: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#141114' },
 });
