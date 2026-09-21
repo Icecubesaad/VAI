@@ -166,13 +166,13 @@ const styles = StyleSheet.create({
   // Serif display — the closet is the user's wardrobe atelier, not a database.
   title: { fontSize: 30, lineHeight: 36, fontWeight: '700', fontFamily: 'PlayfairDisplay_700Bold', letterSpacing: -0.2 },
   count: { fontSize: 13 },
-  rule: { height: 1, backgroundColor: '#2C252C', marginTop: 10, marginBottom: 4 },
+  rule: { height: 1, backgroundColor: '#E7DDE2', marginTop: 10, marginBottom: 4 },
   banner: {
     borderRadius: 16,
     padding: 14,
     marginTop: 12,
     borderWidth: 1,
-    borderColor: '#2C252C',
+    borderColor: '#E7DDE2',
     shadowColor: '#000000',
     shadowOpacity: 0.07,
     shadowRadius: 12,

@@ -24,7 +24,7 @@
       "package": "com.vai.stylist",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#141114"
+        "backgroundColor": "#F4EFF2"
       },
       "permissions": [
         "CAMERA",
@@ -48,7 +48,7 @@
         {
           "image": "./assets/splash.png",
           "resizeMode": "contain",
-          "backgroundColor": "#141114"
+          "backgroundColor": "#F4EFF2"
         }
       ],
       [

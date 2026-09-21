@@ -33,20 +33,20 @@ type Palette = {
 
 // Hue family follows the PLUM ATELIER tokens (theme/tokens.ts): dusty rose,
 // blush, mauve, champagne — every glow position/opacity stays untouched.
-const MINT = '166,58,75';
-const LEMON = '217,165,160';
-const BLUSH = '126,36,56';
-const LILAC = '196,150,140';
-const PERIWINKLE = '142,46,66';
-const SKY = '92,72,82';
+const MINT = '233,203,213';
+const LEMON = '242,228,210';
+const BLUSH = '240,197,221';
+const LILAC = '231,209,224';
+const PERIWINKLE = '196,156,176';
+const SKY = '228,214,222';
 const WHITE = '255,255,255';
 
 const PALETTES: Record<string, Palette> = {
   // Onboarding entry — one continuous blurry wash, dusty rose into mauve
   // with a breath of blush. No shape should ever read as a shape.
   carousel: {
-    base: '#2A1218',
-    fade: ['rgba(42,18,24,0)', 'rgba(42,18,24,0.35)', 'rgba(20,17,20,0.6)'],
+    base: '#D9B3C6',
+    fade: ['rgba(233,205,220,0)', 'rgba(233,211,222,0.28)', 'rgba(240,228,234,0.5)'],
     glows: [
       { rgb: BLUSH, opacity: 0.7, cx: 0.12, cy: 0.1, r: 0.6 },
       { rgb: PERIWINKLE, opacity: 0.55, cx: 0.92, cy: 0.42, r: 0.65 },
@@ -59,8 +59,8 @@ const PALETTES: Record<string, Palette> = {
   // gloomy pastel glows (mint top-left, honey mid-left, rose right edge,
   // lilac + sky breathing along the bottom). Ink and photo cards sit on white.
   onboardingHero: {
-    base: '#181218',
-    fade: ['rgba(24,18,24,0)', 'rgba(24,18,24,0.35)', 'rgba(20,17,20,0.65)'],
+    base: '#FFFFFF',
+    fade: ['rgba(255,255,255,0)', 'rgba(255,255,255,0.25)', 'rgba(255,255,255,0.55)'],
     glows: [
       { rgb: '235,199,211', opacity: 0.75, cx: 0.04, cy: 0.07, r: 0.62 },
       { rgb: '240,215,180', opacity: 0.6, cx: 0.0, cy: 0.44, r: 0.55 },
@@ -74,8 +74,8 @@ const PALETTES: Record<string, Palette> = {
   // card floating on white. (Was a full purple wash; the founder flagged
   // every screen reading as the same purple.)
   auth: {
-    base: '#181218',
-    fade: ['rgba(24,18,24,0)', 'rgba(24,18,24,0.35)', 'rgba(20,17,20,0.65)'],
+    base: '#FFFFFF',
+    fade: ['rgba(255,255,255,0)', 'rgba(255,255,255,0.25)', 'rgba(255,255,255,0.55)'],
     glows: [
       { rgb: BLUSH, opacity: 0.7, cx: 0.06, cy: 0.05, r: 0.6 },
       { rgb: LILAC, opacity: 0.6, cx: 0.96, cy: 0.08, r: 0.58 },
@@ -87,8 +87,8 @@ const PALETTES: Record<string, Palette> = {
   // mint breathing top-left, blush at the right edge, lilac along the bottom
   // so chips and the rail stay readable. (Was a full purple wash.)
   quiz: {
-    base: '#181218',
-    fade: ['rgba(24,18,24,0)', 'rgba(24,18,24,0.35)', 'rgba(20,17,20,0.65)'],
+    base: '#FFFFFF',
+    fade: ['rgba(255,255,255,0)', 'rgba(255,255,255,0.25)', 'rgba(255,255,255,0.55)'],
     glows: [
       { rgb: MINT, opacity: 0.65, cx: 0.06, cy: 0.04, r: 0.58 },
       { rgb: BLUSH, opacity: 0.55, cx: 0.98, cy: 0.55, r: 0.58 },
@@ -99,8 +99,8 @@ const PALETTES: Record<string, Palette> = {
   // tab screens all share the paper base so the app reads as ONE calm canvas;
   // the AI photos carry the color now, not the background.
   home: {
-    base: '#141114',
-    fade: ['rgba(20,17,20,0)', 'rgba(20,17,20,0.35)', 'rgba(20,17,20,0.65)'],
+    base: '#F4EFF2',
+    fade: ['rgba(244,239,242,0)', 'rgba(244,239,242,0.3)', 'rgba(244,239,242,0.55)'],
     glows: [
       { rgb: LEMON, opacity: 0.22, cx: 0.92, cy: 0.05, r: 0.55 },
       { rgb: MINT, opacity: 0.18, cx: 0.06, cy: 0.95, r: 0.55 },
@@ -109,8 +109,8 @@ const PALETTES: Record<string, Palette> = {
   },
   // Closet — same porcelain canvas, mint breathing at the edges.
   closet: {
-    base: '#141114',
-    fade: ['rgba(20,17,20,0)', 'rgba(20,17,20,0.35)', 'rgba(20,17,20,0.65)'],
+    base: '#F4EFF2',
+    fade: ['rgba(244,239,242,0)', 'rgba(244,239,242,0.3)', 'rgba(244,239,242,0.55)'],
     glows: [
       { rgb: MINT, opacity: 0.2, cx: 0.06, cy: 0.08, r: 0.55 },
       { rgb: LILAC, opacity: 0.24, cx: 0.95, cy: 0.95, r: 0.55 },
@@ -118,8 +118,8 @@ const PALETTES: Record<string, Palette> = {
   },
   // Shop — porcelain with a blush-forward warmth at the top corner.
   shop: {
-    base: '#141114',
-    fade: ['rgba(20,17,20,0)', 'rgba(20,17,20,0.35)', 'rgba(20,17,20,0.65)'],
+    base: '#F4EFF2',
+    fade: ['rgba(244,239,242,0)', 'rgba(244,239,242,0.3)', 'rgba(244,239,242,0.55)'],
     glows: [
       { rgb: BLUSH, opacity: 0.24, cx: 0.92, cy: 0.05, r: 0.55 },
       { rgb: SKY, opacity: 0.18, cx: 0.05, cy: 0.95, r: 0.52 },
@@ -128,8 +128,8 @@ const PALETTES: Record<string, Palette> = {
   },
   // Profile — porcelain with a peach/periwinkle dusk breath.
   profile: {
-    base: '#141114',
-    fade: ['rgba(20,17,20,0)', 'rgba(20,17,20,0.35)', 'rgba(20,17,20,0.65)'],
+    base: '#F4EFF2',
+    fade: ['rgba(244,239,242,0)', 'rgba(244,239,242,0.3)', 'rgba(244,239,242,0.55)'],
     glows: [
       { rgb: '236,196,186', opacity: 0.22, cx: 0.08, cy: 0.06, r: 0.52 },
       { rgb: PERIWINKLE, opacity: 0.18, cx: 0.95, cy: 0.95, r: 0.55 },
@@ -139,8 +139,8 @@ const PALETTES: Record<string, Palette> = {
   // with selective pastel breath at the corners (mint top-left, rose right,
   // lilac along the bottom). Same family as the carousel hero.
   quiet: {
-    base: '#181218',
-    fade: ['rgba(24,18,24,0)', 'rgba(24,18,24,0.35)', 'rgba(20,17,20,0.65)'],
+    base: '#FFFFFF',
+    fade: ['rgba(255,255,255,0)', 'rgba(255,255,255,0.25)', 'rgba(255,255,255,0.55)'],
     glows: [
       { rgb: MINT, opacity: 0.6, cx: 0.05, cy: 0.06, r: 0.58 },
       { rgb: BLUSH, opacity: 0.55, cx: 0.98, cy: 0.42, r: 0.58 },

@@ -391,7 +391,7 @@ const styles = StyleSheet.create({
   // Serif display — the shop is a curated boutique rail, not a product dump.
   header: { fontSize: 30, lineHeight: 36, fontWeight: '700', fontFamily: 'PlayfairDisplay_700Bold', letterSpacing: -0.2, marginBottom: 4 },
   // Hairline under the header — the atelier rule, same as home + closet.
-  headerRule: { height: 1, backgroundColor: '#2C252C', marginBottom: 10 },
+  headerRule: { height: 1, backgroundColor: '#E7DDE2', marginBottom: 10 },
   segRow: { flexDirection: 'row', gap: 4, marginBottom: 10 },
   segHit: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999 },
   segHitOn: {
@@ -421,7 +421,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
     elevation: 3,
   },
-  image: { width: '100%', aspectRatio: 3 / 4, backgroundColor: '#241E24' },
+  image: { width: '100%', aspectRatio: 3 / 4, backgroundColor: '#F0E7EC' },
   badge: { position: 'absolute', top: 8, left: 8, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
   badgeText: { fontSize: 11, fontWeight: '700' },
   meta: { padding: 10, gap: 4 },

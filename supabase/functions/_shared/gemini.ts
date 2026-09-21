@@ -1,20 +1,24 @@
-// AI callers (Deno, strict TS) — routed through OpenRouter.
-// Founder-mandated routing (Sep 2026):
-//   TEXT+VISION → `z-ai/glm-5.3-flash` (vision-capable — deepseek is not),
-//           providers pinned to `gmicloud/fp8` + `deepinfra/fp4` with
-//           fallbacks ON so the two can fail over (request-level
-//           `provider.only`, never a different host).
-//   IMAGE → `google/gemini-3.1-flash-image` via OpenRouter chat-completions
-//           multimodal output (choices[0].message.images[]).
-// All server-side only — OPENROUTER_API_KEY never leaves Edge Function secrets.
-// The FASHN fallback chain in pipeline.ts still applies BELOW this layer.
+// Gemini callers (Deno, strict TS).
+// README stack: `gemini-3.1-flash-image` primary (~$0.067/img), `gemini-3-pro-image`
+// fallback for image work; a Flash text model for outfit reasoning/auto-tag/quiz.
+// All server-side only — GEMINI_API_KEY never leaves Edge Function secrets.
 
-export const OR_TEXT_MODEL = Deno.env.get("OR_TEXT_MODEL") ?? "z-ai/glm-5.3-flash";
-export const OR_IMAGE_MODEL = Deno.env.get("OR_IMAGE_MODEL") ?? "google/gemini-3.1-flash-lite-image";
-/** Founder pin: these two providers, fail over between them. */
-const TEXT_PROVIDER_PIN = { only: ["gmicloud/fp8", "deepinfra/fp4"], allow_fallbacks: true } as const;
+// Primary = Nano Banana 2 LITE (gemini-3.1-flash-lite-image): the cheapest
+// image model (~$0.005/img) — founder runs without billing attached today, so
+// the chain must start at the cheapest viable model and only fall upward.
+// Override with GEMINI_IMAGE_MODEL. Free-tier quota for ALL image models is
+// currently 0 (verified against the live API), so renders stay quota-gated.
+export const GEMINI_FLASH_IMAGE = Deno.env.get("GEMINI_IMAGE_MODEL") ?? "gemini-3.1-flash-lite-image";
+export const GEMINI_PRO_IMAGE = "gemini-3.1-flash-image";
+/**
+ * Overridable via env; README pins "Gemini Flash" for text/vision reasoning.
+ * Default `gemini-2.5-flash`: stable AND on the Gemini API free tier (the
+ * founder runs without billing attached — gemini-3-flash is a PREVIEW model
+ * with billing enabled and 402s on free keys; 2.5-flash does multimodal
+ * image INPUT free, which auto-tag needs).
+ */
+export const geminiTextModel = (): string => Deno.env.get("GEMINI_TEXT_MODEL") ?? "gemini-2.5-flash";
 
-// Kept for the cost ledger + pipeline labels (USD per successful render).
 export const GEMINI_STD_COST_USD = 0.067;
 
 export class GeminiError extends Error {
@@ -26,59 +30,53 @@ export class GeminiError extends Error {
 }
 
 function apiKey(): string {
-  const k = Deno.env.get("OPENROUTER_API_KEY");
-  if (!k) throw new GeminiError("transport", "OPENROUTER_API_KEY is not configured");
+  const k = Deno.env.get("GEMINI_API_KEY");
+  if (!k) throw new GeminiError("transport", "GEMINI_API_KEY is not configured");
   return k;
 }
 
-interface ORResponse {
-  choices?: Array<{
-    message?: {
-      content?: string | null;
-      images?: Array<{ image_url?: { url?: string } }>;
-    };
-    finish_reason?: string;
-  }>;
-  error?: { message?: string; code?: number };
+interface Part {
+  text?: string;
+  inlineData?: { mimeType: string; data: string };
+}
+interface GenerateResponse {
+  candidates?: Array<{ content?: { parts?: Part[] }; finishReason?: string }>;
+  promptFeedback?: { blockReason?: string };
 }
 
-async function orPost(body: Record<string, unknown>, timeoutMs: number): Promise<ORResponse> {
+async function postGenerate(
+  model: string,
+  body: Record<string, unknown>,
+  timeoutMs: number,
+): Promise<GenerateResponse> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey()}`,
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey() },
+        body: JSON.stringify(body),
+        signal: ctrl.signal,
       },
-      body: JSON.stringify(body),
-      signal: ctrl.signal,
-    });
-    if (res.status === 429) throw new GeminiError("quota", "OpenRouter rate limit hit");
-    if (res.status === 402) throw new GeminiError("quota", "OpenRouter credits exhausted");
-    if (!res.ok) throw new GeminiError("transport", `OpenRouter HTTP ${res.status}`);
-    const json = (await res.json()) as ORResponse;
-    if (json.error?.message) throw new GeminiError("transport", `OpenRouter: ${json.error.message}`);
-    return json;
+    );
+    if (res.status === 429) throw new GeminiError("quota", "Gemini rate limit hit");
+    if (!res.ok) throw new GeminiError("transport", `Gemini HTTP ${res.status}`);
+    return (await res.json()) as GenerateResponse;
   } catch (e) {
     if (e instanceof GeminiError) throw e;
     if (e instanceof DOMException && e.name === "AbortError") {
-      throw new GeminiError("transport", `OpenRouter timed out after ${timeoutMs}ms`);
+      throw new GeminiError("transport", `Gemini timed out after ${timeoutMs}ms`);
     }
-    throw new GeminiError("transport", `OpenRouter request failed: ${(e as Error).message}`);
+    throw new GeminiError("transport", `Gemini request failed: ${(e as Error).message}`);
   } finally {
     clearTimeout(t);
   }
 }
 
-type ImageRef = { type: "image_url"; image_url: { url: string } };
-
-/** https URLs pass through; local/data refs are inlined as data URLs. */
-async function imageRef(url: string): Promise<ImageRef> {
-  if (url.startsWith("http://") || url.startsWith("https://")) {
-    return { type: "image_url", image_url: { url } };
-  }
+/** Fetch any URL (http/https) and return base64 + mime for Gemini inlineData. */
+export async function urlToInlinePart(url: string): Promise<Part> {
   const res = await fetch(url);
   if (!res.ok) throw new GeminiError("transport", `Reference fetch failed: HTTP ${res.status}`);
   const buf = new Uint8Array(await res.arrayBuffer());
@@ -90,28 +88,29 @@ async function imageRef(url: string): Promise<ImageRef> {
   for (let i = 0; i < buf.length; i += CHUNK) {
     bin += String.fromCharCode(...buf.subarray(i, i + CHUNK));
   }
-  const mime = res.headers.get("content-type")?.split(";")[0] || "image/jpeg";
-  return { type: "image_url", image_url: { url: `data:${mime};base64,${btoa(bin)}` } };
+  return {
+    inlineData: {
+      mimeType: res.headers.get("content-type")?.split(";")[0] || "image/jpeg",
+      data: btoa(bin),
+    },
+  };
 }
 
-/** Back-compat export (was Gemini inlineData; callers pass URLs today). */
-export async function urlToInlinePart(url: string): Promise<{ url: string }> {
-  return { url };
-}
-
-function firstText(resp: ORResponse): string {
-  const choice = resp.choices?.[0];
-  const text = (choice?.message?.content ?? "").trim();
+function firstText(resp: GenerateResponse): string {
+  const block = resp.promptFeedback?.blockReason;
+  if (block) throw new GeminiError("safety", `Blocked by Gemini safety filter: ${block}`);
+  const parts = resp.candidates?.[0]?.content?.parts ?? [];
+  const text = parts.map((p) => p.text ?? "").join("").trim();
   if (!text) {
-    throw new GeminiError("safety", `Model returned no text (${choice?.finish_reason ?? "empty"})`);
+    const reason = resp.candidates?.[0]?.finishReason ?? "empty";
+    throw new GeminiError("safety", `Gemini returned no text (${reason})`);
   }
   return text;
 }
 
 /**
  * Strict-JSON text/vision call (temp 0). `validate` narrows unknown → T;
- * throws GeminiError("parse") when the model will not conform. JSON discipline
- * is prompt-driven + stripped (the pinned provider may not honor response_format).
+ * throws GeminiError("parse") when the model will not conform.
  */
 export async function generateJson<T>(opts: {
   system: string;
@@ -121,23 +120,16 @@ export async function generateJson<T>(opts: {
   validate: (v: unknown) => v is T;
   timeoutMs?: number;
 }): Promise<T> {
-  const content: Array<Record<string, unknown>> = [{ type: "text", text: opts.user }];
+  const model = opts.model ?? geminiTextModel();
+  const parts: Part[] = [{ text: opts.user }];
   for (const url of opts.imageUrls ?? []) {
-    content.push(await imageRef(url));
+    parts.push(await urlToInlinePart(url));
   }
-  const resp = await orPost(
-    {
-      model: opts.model ?? OR_TEXT_MODEL,
-      provider: { ...TEXT_PROVIDER_PIN },
-      messages: [
-        { role: "system", content: opts.system },
-        { role: "user", content },
-      ],
-      temperature: 0,
-      max_tokens: 2048,
-    },
-    opts.timeoutMs ?? 30000,
-  );
+  const resp = await postGenerate(model, {
+    systemInstruction: { parts: [{ text: opts.system }] },
+    contents: [{ parts }],
+    generationConfig: { temperature: 0, maxOutputTokens: 2048, responseMimeType: "application/json" },
+  }, opts.timeoutMs ?? 30000);
   const text = firstText(resp).replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
   let parsed: unknown;
   try {
@@ -155,9 +147,8 @@ export interface GeneratedImage {
 }
 
 /**
- * Image generation/edit via OpenRouter multimodal output. Reference photos go
- * in as image_url parts ahead of the prompt. Throws on safety blocks so the
- * caller can fall through to the next provider.
+ * Image generation/edit. Reference photos go in as inlineData ahead of the prompt.
+ * Throws on safety blocks so the caller can fall through to the next provider.
  */
 export async function generateImage(opts: {
   prompt: string;
@@ -165,26 +156,30 @@ export async function generateImage(opts: {
   model?: string;
   timeoutMs?: number;
 }): Promise<GeneratedImage> {
-  const content: Array<Record<string, unknown>> = [];
+  const model = opts.model ?? GEMINI_FLASH_IMAGE;
+  const parts: Part[] = [];
   for (const url of opts.refImageUrls ?? []) {
-    content.push(await imageRef(url));
+    parts.push(await urlToInlinePart(url));
   }
-  content.push({ type: "text", text: opts.prompt });
-  const resp = await orPost(
-    {
-      model: opts.model ?? OR_IMAGE_MODEL,
-      messages: [{ role: "user", content }],
-    },
-    opts.timeoutMs ?? 85000,
-  );
+  parts.push({ text: opts.prompt });
+  const resp = await postGenerate(model, {
+    contents: [{ parts }],
+    generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
+  }, opts.timeoutMs ?? 85000);
 
-  const dataUrl = resp.choices?.[0]?.message?.images?.[0]?.image_url?.url ?? "";
-  const m = /^data:(image\/[a-z+]+);base64,(.+)$/i.exec(dataUrl);
-  if (!m) {
-    throw new GeminiError("safety", `No image returned (${resp.choices?.[0]?.finish_reason ?? "empty"})`);
+  if (resp.promptFeedback?.blockReason) {
+    throw new GeminiError("safety", `Image blocked: ${resp.promptFeedback.blockReason}`);
   }
-  const bin = atob(m[2]);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return { bytes, mimeType: m[1] };
+  for (const p of resp.candidates?.[0]?.content?.parts ?? []) {
+    if (p.inlineData?.data) {
+      const bin = atob(p.inlineData.data);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return { bytes, mimeType: p.inlineData.mimeType || "image/png" };
+    }
+  }
+  throw new GeminiError(
+    "safety",
+    `No image returned (${resp.candidates?.[0]?.finishReason ?? "empty"})`,
+  );
 }

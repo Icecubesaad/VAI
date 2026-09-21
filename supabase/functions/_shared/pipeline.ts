@@ -8,7 +8,7 @@
 // push with keep-best. Failed predictions always cost the user 0.
 
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { OR_IMAGE_MODEL, GEMINI_STD_COST_USD, generateImage } from "./gemini.ts";
+import { GEMINI_FLASH_IMAGE, GEMINI_PRO_IMAGE, GEMINI_STD_COST_USD, generateImage } from "./gemini.ts";
 import { FASHN_MAX_COST_USD, FASHN_STD_COST_USD, pollToDone, runTryon } from "./fashn.ts";
 import { HttpError } from "./http.ts";
 import { logRenderCost, todaySpendUsd } from "./ledger.ts";
@@ -194,25 +194,27 @@ interface JobRow {
 function providerChain(tier: PipelineTier): string[] {
   // VERIFIED Sep-2026 (INTEGRATION-REPORT founder decision #1): Gemini is
   // PRIMARY for try-on, FASHN is fallback-only. Order per tier:
-  //   std/max → google/gemini-3.1-flash-image (OpenRouter) → fashn-std/max
-  // One AI leg + FASHN: the founder's mandated image model IS the top
-  // fidelity leg; FASHN remains the safety fallback. `model_hint` from the
+  //   std → gemini-3.1-flash-lite-image → gemini-3.1-flash-image → fashn-std
+  //   max → gemini-3.1-flash-image → gemini-3.1-flash-lite-image → fashn-max
+  // Native Gemini (founder: no OpenRouter). FASHN remains the safety
+  // fallback. `model_hint` from the
   // client is recorded in render meta for analytics but NEVER reorders this
   // chain — the server owns provider selection and cost attribution.
   return tier === "max"
-    ? [OR_IMAGE_MODEL, "fashn-max"]
-    : [OR_IMAGE_MODEL, "fashn-std"];
+    ? [GEMINI_PRO_IMAGE, GEMINI_FLASH_IMAGE, "fashn-max"]
+    : [GEMINI_FLASH_IMAGE, GEMINI_PRO_IMAGE, "fashn-std"];
 }
 
 function providerCostUsd(provider: string): number {
   if (provider === "fashn-max") return FASHN_MAX_COST_USD;
   if (provider === "fashn-std") return FASHN_STD_COST_USD;
-  if (provider === OR_IMAGE_MODEL) return GEMINI_STD_COST_USD;
+  if (provider === GEMINI_FLASH_IMAGE) return 0.005;
   return GEMINI_STD_COST_USD;
 }
 
 function providerLabel(provider: string): string {
-  if (provider === OR_IMAGE_MODEL) return "gemini-flash-image";
+  if (provider === GEMINI_FLASH_IMAGE) return "gemini-flash-lite";
+  if (provider === GEMINI_PRO_IMAGE) return "gemini-flash";
   return provider;
 }
 

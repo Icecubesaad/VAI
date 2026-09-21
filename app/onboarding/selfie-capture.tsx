@@ -727,7 +727,7 @@ const styles = StyleSheet.create({
   usePillBlocked: { opacity: 0.55 },
   usePillText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700', fontFamily: 'Poppins_600SemiBold' },
   consentDark: { color: 'rgba(255,255,255,0.65)', fontSize: 12, textAlign: 'center' },
-  sheet: { backgroundColor: '#141114', padding: 20, gap: 10, borderTopLeftRadius: 20, borderTopRightRadius: 20 },
+  sheet: { backgroundColor: '#F4EFF2', padding: 20, gap: 10, borderTopLeftRadius: 20, borderTopRightRadius: 20 },
   fail: { fontSize: 14, lineHeight: 20, textAlign: 'center' },
   consent: { fontSize: 12 },
   row: { flexDirection: 'row', gap: 10 },

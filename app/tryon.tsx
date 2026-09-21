@@ -203,7 +203,7 @@ const styles = StyleSheet.create({
   kicker: { fontSize: 13, fontWeight: '600', letterSpacing: 0.3 },
   title: { fontSize: 34, lineHeight: 40, fontWeight: '700', fontFamily: 'PlayfairDisplay_700Bold', letterSpacing: -0.4 },
   base: { width: '100%', aspectRatio: 3 / 4, borderRadius: 16 },
-  basePlaceholder: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#241E24' },
+  basePlaceholder: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#F0E7EC' },
   rack: { flexDirection: 'row', gap: 10 },
   thumb: { width: 64, height: 84, borderRadius: 10 },
   cta: { borderRadius: 999, paddingVertical: 16, alignItems: 'center' },

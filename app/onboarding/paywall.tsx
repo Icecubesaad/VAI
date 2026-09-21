@@ -323,7 +323,7 @@ const styles = StyleSheet.create({
     marginTop: 20,
     gap: 6,
     borderWidth: 1,
-    borderColor: '#332B33',
+    borderColor: '#F1E9ED',
     shadowColor: '#000000',
     shadowOpacity: 0.09,
     shadowRadius: 14,

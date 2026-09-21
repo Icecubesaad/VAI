@@ -504,5 +504,5 @@ export default function RootLayout() {
 }
 
 const styles = StyleSheet.create({
-  boot: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#141114' },
+  boot: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F4EFF2' },
 });
