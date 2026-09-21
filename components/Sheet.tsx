@@ -183,7 +183,7 @@ export const Sheet = memo(function Sheet({
                   void hapticFor.select();
                   setWithTrial(v);
                 }}
-                trackColor={{ true: '#7C5CE8', false: '#E6E0F5' }}
+                trackColor={{ true: '#3A2331', false: '#E7DDE2' }}
                 accessibilityRole="switch"
                 accessibilityLabel="7-day free trial"
                 accessibilityState={{ checked: withTrial, disabled: purchasing }}

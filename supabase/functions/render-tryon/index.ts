@@ -146,6 +146,9 @@ async function resolveGarmentIds(
 }
 
 const INGEST_MAX_BYTES = 8 * 1024 * 1024;
+// Base-photo ingest HEAD/download budget (was referenced but never defined —
+// every ingest 500'd at runtime).
+const INGEST_TIMEOUT_MS = 10_000;
 
 /**
  * base_photo_url without an ID: accepts ONLY this project's own private
@@ -484,6 +487,17 @@ Deno.serve(async (req) => {
         poseMode,
         poseRefId: poseRef?.poseRefId ?? null,
       });
+      // RENDER_INLINE (dev / pre-Inngest): run the provider chain in this
+      // request and return the finished render instead of a 202 queued stub.
+      if (Deno.env.get("RENDER_INLINE") === "true") {
+        await processRender(sb, row.id);
+        const done = await findRenderByKey(sb, user.id, key);
+        if (!done) throw new HttpError(500, "render_missing", "Render row disappeared mid-process.");
+        return json({
+          ...(await statusPayload(sb, done)),
+          idempotency_key: key,
+        }, done.status === "done" ? 200 : 500);
+      }
     } catch (e) {
       if ((e as { code?: string }).code !== "23505") throw e;
       // The renders.idempotency_key UNIQUE constraint is GLOBAL, while the

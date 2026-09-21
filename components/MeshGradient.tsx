@@ -31,20 +31,22 @@ type Palette = {
   fade: [string, string, string];
 };
 
-const MINT = '191,222,203';
-const LEMON = '240,231,196';
+// Hue family follows the PLUM ATELIER tokens (theme/tokens.ts): dusty rose,
+// blush, mauve, champagne — every glow position/opacity stays untouched.
+const MINT = '233,203,213';
+const LEMON = '242,228,210';
 const BLUSH = '240,197,221';
-const LILAC = '219,199,246';
-const PERIWINKLE = '164,144,222';
-const SKY = '199,217,240';
+const LILAC = '231,209,224';
+const PERIWINKLE = '196,156,176';
+const SKY = '228,214,222';
 const WHITE = '255,255,255';
 
 const PALETTES: Record<string, Palette> = {
-  // Onboarding entry — one continuous blurry wash, dusty lavender into pink
-  // with a breath of mint. No shape should ever read as a shape.
+  // Onboarding entry — one continuous blurry wash, dusty rose into mauve
+  // with a breath of blush. No shape should ever read as a shape.
   carousel: {
-    base: '#AE9FDF',
-    fade: ['rgba(214,205,242,0)', 'rgba(221,213,245,0.28)', 'rgba(233,227,250,0.5)'],
+    base: '#D9B3C6',
+    fade: ['rgba(233,205,220,0)', 'rgba(233,211,222,0.28)', 'rgba(240,228,234,0.5)'],
     glows: [
       { rgb: BLUSH, opacity: 0.7, cx: 0.12, cy: 0.1, r: 0.6 },
       { rgb: PERIWINKLE, opacity: 0.55, cx: 0.92, cy: 0.42, r: 0.65 },
@@ -60,11 +62,11 @@ const PALETTES: Record<string, Palette> = {
     base: '#FFFFFF',
     fade: ['rgba(255,255,255,0)', 'rgba(255,255,255,0.25)', 'rgba(255,255,255,0.55)'],
     glows: [
-      { rgb: '178,222,208', opacity: 0.75, cx: 0.04, cy: 0.07, r: 0.62 },
-      { rgb: '245,209,139', opacity: 0.6, cx: 0.0, cy: 0.44, r: 0.55 },
+      { rgb: '235,199,211', opacity: 0.75, cx: 0.04, cy: 0.07, r: 0.62 },
+      { rgb: '240,215,180', opacity: 0.6, cx: 0.0, cy: 0.44, r: 0.55 },
       { rgb: '238,168,205', opacity: 0.7, cx: 0.99, cy: 0.36, r: 0.62 },
-      { rgb: '214,190,242', opacity: 0.6, cx: 0.18, cy: 0.96, r: 0.6 },
-      { rgb: '186,205,240', opacity: 0.55, cx: 0.92, cy: 0.92, r: 0.55 },
+      { rgb: '226,196,216', opacity: 0.6, cx: 0.18, cy: 0.96, r: 0.6 },
+      { rgb: '222,204,214', opacity: 0.55, cx: 0.92, cy: 0.92, r: 0.55 },
     ],
   },
   // Auth — the phone reference's selective-gradient language: a white
@@ -77,7 +79,7 @@ const PALETTES: Record<string, Palette> = {
     glows: [
       { rgb: BLUSH, opacity: 0.7, cx: 0.06, cy: 0.05, r: 0.6 },
       { rgb: LILAC, opacity: 0.6, cx: 0.96, cy: 0.08, r: 0.58 },
-      { rgb: '245,209,139', opacity: 0.4, cx: 0.0, cy: 0.5, r: 0.5 },
+      { rgb: '240,215,180', opacity: 0.4, cx: 0.0, cy: 0.5, r: 0.5 },
       { rgb: SKY, opacity: 0.45, cx: 0.9, cy: 0.95, r: 0.55 },
     ],
   },
@@ -93,12 +95,12 @@ const PALETTES: Record<string, Palette> = {
       { rgb: LILAC, opacity: 0.55, cx: 0.3, cy: 0.97, r: 0.58 },
     ],
   },
-  // Today — porcelain ground with a whisper of lemon/mint/lilac aura. Light
+  // Today — porcelain ground with a whisper of champagne/rose/mauve aura. Light
   // tab screens all share the paper base so the app reads as ONE calm canvas;
   // the AI photos carry the color now, not the background.
   home: {
-    base: '#FAF9FE',
-    fade: ['rgba(250,249,254,0)', 'rgba(250,249,254,0.3)', 'rgba(250,249,254,0.55)'],
+    base: '#F4EFF2',
+    fade: ['rgba(244,239,242,0)', 'rgba(244,239,242,0.3)', 'rgba(244,239,242,0.55)'],
     glows: [
       { rgb: LEMON, opacity: 0.22, cx: 0.92, cy: 0.05, r: 0.55 },
       { rgb: MINT, opacity: 0.18, cx: 0.06, cy: 0.95, r: 0.55 },
@@ -107,8 +109,8 @@ const PALETTES: Record<string, Palette> = {
   },
   // Closet — same porcelain canvas, mint breathing at the edges.
   closet: {
-    base: '#FAF9FE',
-    fade: ['rgba(250,249,254,0)', 'rgba(250,249,254,0.3)', 'rgba(250,249,254,0.55)'],
+    base: '#F4EFF2',
+    fade: ['rgba(244,239,242,0)', 'rgba(244,239,242,0.3)', 'rgba(244,239,242,0.55)'],
     glows: [
       { rgb: MINT, opacity: 0.2, cx: 0.06, cy: 0.08, r: 0.55 },
       { rgb: LILAC, opacity: 0.24, cx: 0.95, cy: 0.95, r: 0.55 },
@@ -116,8 +118,8 @@ const PALETTES: Record<string, Palette> = {
   },
   // Shop — porcelain with a blush-forward warmth at the top corner.
   shop: {
-    base: '#FAF9FE',
-    fade: ['rgba(250,249,254,0)', 'rgba(250,249,254,0.3)', 'rgba(250,249,254,0.55)'],
+    base: '#F4EFF2',
+    fade: ['rgba(244,239,242,0)', 'rgba(244,239,242,0.3)', 'rgba(244,239,242,0.55)'],
     glows: [
       { rgb: BLUSH, opacity: 0.24, cx: 0.92, cy: 0.05, r: 0.55 },
       { rgb: SKY, opacity: 0.18, cx: 0.05, cy: 0.95, r: 0.52 },
@@ -126,10 +128,10 @@ const PALETTES: Record<string, Palette> = {
   },
   // Profile — porcelain with a peach/periwinkle dusk breath.
   profile: {
-    base: '#FAF9FE',
-    fade: ['rgba(250,249,254,0)', 'rgba(250,249,254,0.3)', 'rgba(250,249,254,0.55)'],
+    base: '#F4EFF2',
+    fade: ['rgba(244,239,242,0)', 'rgba(244,239,242,0.3)', 'rgba(244,239,242,0.55)'],
     glows: [
-      { rgb: '244,205,183', opacity: 0.22, cx: 0.08, cy: 0.06, r: 0.52 },
+      { rgb: '236,196,186', opacity: 0.22, cx: 0.08, cy: 0.06, r: 0.52 },
       { rgb: PERIWINKLE, opacity: 0.18, cx: 0.95, cy: 0.95, r: 0.55 },
     ],
   },

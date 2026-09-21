@@ -7,6 +7,7 @@ import { api, apiErrorCopy, type QuizAnswers } from '@/lib/api';
 import { dnaGalleryFor } from '@/lib/dna-gallery';
 import { useQuiz, QUIZ_STEPS, type QuizStepKey } from '@/store/quiz';
 import { useSession } from '@/store/session';
+import { track } from '@/lib/analytics';
 
 /**
  * Style catalog — curated personas per side. Product copy (real options the
@@ -187,6 +188,8 @@ export default function QuizScreen() {
     try {
       const r = await api.scoreQuiz({ answers: complete });
       setResult(r);
+      const uid = useSession.getState().userId;
+      track('quiz_completed', { user_id: uid ?? 'anonymous', tier: 'free', quiz_version: 1 });
     } catch (e) {
       setError(apiErrorCopy(e).message);
     } finally {
