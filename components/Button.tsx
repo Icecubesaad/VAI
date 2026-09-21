@@ -76,7 +76,7 @@ export const Button = memo(function Button({
       <Text className={`${s.text} ${textCls[variant]} ${loading ? 'opacity-0' : ''}`}>{title}</Text>
       {loading ? (
         <View className="absolute inset-0 items-center justify-center">
-          <ActivityIndicator size="small" color={variant === 'secondary' || variant === 'ghost' || variant === 'dev' ? '#211C33' : '#FFFFFF'} />
+          <ActivityIndicator size="small" color={variant === 'secondary' || variant === 'ghost' || variant === 'dev' ? '#1D141C' : '#FFFFFF'} />
         </View>
       ) : null}
     </View>
@@ -106,7 +106,7 @@ export const Button = memo(function Button({
           {/* Gloss: deep-base violet gradient + a hairline sheen at the top
               edge — the button reads lacquered, not flat. */}
           <LinearGradient
-            colors={['#8B6CF2', '#6645D9']}
+            colors={['#3A2331', '#000000']}
             start={{ x: 0.2, y: 0 }}
             end={{ x: 0.8, y: 1 }}
             style={StyleSheet.absoluteFill}
@@ -124,7 +124,7 @@ export const Button = memo(function Button({
 
 const styles = StyleSheet.create({
   primaryDepth: {
-    shadowColor: '#6645D9',
+    shadowColor: '#000000',
     shadowOpacity: 0.38,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 6 },

@@ -10,7 +10,7 @@
  * ```tsx
  * import { ThemeProvider, useTheme } from '@/theme';
  * const { colors } = useTheme();
- * colors.background // '#FAF8F5' (tokens.colors.paper)
+ * colors.background // '#141114' (tokens.colors.paper)
  * ```
  *
  * Deep imports (`@/theme/tokens`, `@/theme/ThemeProvider`) keep working

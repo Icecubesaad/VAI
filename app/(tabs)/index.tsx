@@ -197,7 +197,7 @@ export default function PlannerHome() {
         onPress: () => {
           void hapticFor.select();
           router.push({
-            pathname: '/(tabs)/tryon',
+            pathname: '/tryon',
             params: {
               outfitId: outfit.id,
               garmentIds: outfit.garmentIds.join(','),
@@ -224,7 +224,7 @@ export default function PlannerHome() {
         onPress: () => {
           void hapticFor.select();
           router.push({
-            pathname: '/(tabs)/tryon',
+            pathname: '/tryon',
             params: { garmentIds: c.garmentIds.join(',') },
           });
         },
@@ -315,7 +315,9 @@ export default function PlannerHome() {
               left={rendersLeft}
               cap={quotaCap}
               onPress={() => {
-                if (tier === 'free') router.push('/onboarding/paywall');
+                if (tier === 'free') {
+                  router.push({ pathname: '/onboarding/paywall', params: { placement: 'home' } });
+                }
               }}
             />
             <Pressable
@@ -327,6 +329,20 @@ export default function PlannerHome() {
               style={styles.profileHit}
             >
               <Icon name="profile" color={tokenColors.ink} size={22} />
+            </Pressable>
+          </View>
+        </View>
+        {/* The masthead — the 153012 inspo's serif title line + quick icons. */}
+        <View style={styles.mastheadRow}>
+          <Text style={[styles.masthead, { color: colors.text }]} testID="home-masthead">
+            Find Your Best Outfit
+          </Text>
+          <View style={styles.headerRight}>
+            <Pressable hitSlop={10} style={styles.profileHit} accessibilityRole="button" accessibilityLabel="Saved looks">
+              <Icon name="heart" color={tokenColors.ink} size={20} strokeWidth={2} />
+            </Pressable>
+            <Pressable hitSlop={10} style={styles.profileHit} accessibilityRole="button" accessibilityLabel="Style my week">
+              <Icon name="sparkles" color={tokenColors.ink} size={20} strokeWidth={2} />
             </Pressable>
           </View>
         </View>
@@ -626,6 +642,27 @@ export default function PlannerHome() {
             setTodayEvent(tag);
           }}
         />
+
+        {/* My Items — the inspo's bottom rack: mini thumbs + add new. */}
+        <View style={[styles.myItems, { backgroundColor: colors.surface, borderColor: colors.border }]} testID="my-items">
+          <View style={styles.myItemsHead}>
+            <Text style={[styles.myItemsTitle, { color: colors.text }]}>My Items</Text>
+            <Pressable
+              onPress={() => router.push('/(tabs)/closet')}
+              style={[styles.addItem, { backgroundColor: colors.primary }]}
+              testID="my-items-add"
+              accessibilityRole="button"
+              accessibilityLabel="Add new items to your closet"
+            >
+              <Text style={[styles.addItemText, { color: colors.onPrimary }]}>Add new</Text>
+            </Pressable>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.myItemsThumbs}>
+            {garments.slice(0, 8).map((g) => (
+              <Image key={g.id} source={{ uri: g.cutoutUrl ?? g.imageUrl }} style={[styles.myItemsThumb, { backgroundColor: colors.well }]} />
+            ))}
+          </ScrollView>
+        </View>
       </ScrollView>
     </View>
   );
@@ -643,6 +680,14 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  mastheadRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 2, marginBottom: 12 },
+  masthead: {
+    fontSize: 30,
+    lineHeight: 36,
+    fontWeight: '700',
+    fontFamily: 'PlayfairDisplay_700Bold',
+    letterSpacing: -0.4,
+  },
   profileHit: {
     width: 38,
     height: 38,
@@ -821,7 +866,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
     padding: 14,
-    shadowColor: '#44307E',
+    shadowColor: '#000000',
     shadowOpacity: 0.08,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 4 },
@@ -841,4 +886,11 @@ const styles = StyleSheet.create({
   buttonText: { fontSize: 15, fontWeight: '600' },
   errorBox: { borderWidth: 1, borderRadius: 12, padding: 12, marginTop: 12 },
   error: { fontSize: 13, lineHeight: 18 },
+  myItems: { borderRadius: 18, borderWidth: 1, padding: 14, gap: 10, marginTop: 18 },
+  myItemsHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  myItemsTitle: { fontSize: 16, fontWeight: '700' },
+  addItem: { borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
+  addItemText: { fontSize: 12, fontWeight: '700' },
+  myItemsThumbs: { flexDirection: 'row', gap: 10 },
+  myItemsThumb: { width: 48, height: 60, borderRadius: 8 },
 });

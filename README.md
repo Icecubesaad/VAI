@@ -40,3 +40,10 @@ EAS dev-client required (Expo Go cannot run camera/purchases native modules).
 3. Renders take 10–55s IRL — async queue + push, never fake countdowns.
 4. Apple 30% baked into every price. Affiliate = physical goods only (IAP-exempt).
 5. v1 cuts: NO social feed, battles, fragrance, stylist video, family/student plans.
+6. REEL PAUSED (cost): the AI-render reel (7 renders/user/week) is removed —
+   horrendous image-API costs. Reel v2 = a Pinterest-catalog moodboard: the
+   founder's curated inspo folder (refreshed daily) + the user's own
+   style_pins (pinterest-sync), themed per their quiz DNA — editorial
+   "Vogue-cover-of-you" energy (masonry inspo + the shareable DNA card are
+   the vanity loop; see `lib/inspiration.ts`, `InspirationStrip`,
+   `style_pins`, ShareDNA). No AI renders in v2 reels.

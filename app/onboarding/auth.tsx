@@ -142,6 +142,14 @@ export default function AuthScreen() {
       useSession.getState().setFunnelOwner(userId);
       setSentryUser(userId);
       void initAnalytics(userId, 'free').catch(() => undefined);
+      // ATT prompt (iOS): requested in-context post sign-up, never at cold
+      // launch — and required before any future IDFA-based attribution.
+      if (Platform.OS === 'ios') {
+        // Lazy: the static import crashes the web bundle (no native module).
+        void import('expo-tracking-transparency')
+          .then((m) => m.requestTrackingPermissionsAsync())
+          .catch(() => undefined);
+      }
       const parentalConsentAt = gate
         ? gate.ageBand === 'p13_17' && gate.parentalConsent
           ? new Date().toISOString()

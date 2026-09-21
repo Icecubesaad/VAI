@@ -61,6 +61,20 @@ export function toErrorResponse(err: unknown): Response {
     );
   }
   console.error("[unhandled]", err);
+  // DEBUG_ERRORS=true (dev/triage only): surface the real message instead of
+  // the generic internal — never enable in production.
+  if (Deno.env.get("DEBUG_ERRORS") === "true") {
+    let message: string;
+    try {
+      message = err instanceof Error ? `${err.message}\n${err.stack ?? ""}` : JSON.stringify(err);
+    } catch {
+      message = String(err);
+    }
+    return new Response(
+      JSON.stringify({ ok: false, error: { code: "internal", message } }),
+      { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+    );
+  }
   return new Response(
     JSON.stringify({
       ok: false,

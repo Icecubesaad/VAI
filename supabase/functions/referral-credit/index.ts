@@ -8,6 +8,7 @@
 import { admin, requireUser } from "../_shared/auth.ts";
 import { badRequest, forbidden, handleOptions, json, readJson, requireMethod, toErrorResponse } from "../_shared/http.ts";
 import { logReferralGrant } from "../_shared/ledger.ts";
+import { captureServerEvent } from "../_shared/posthog.ts";
 
 const REQUIRED_ITEMS = 3;
 const REQUIRED_TRYONS = 1;
@@ -105,6 +106,23 @@ Deno.serve(async (req) => {
     const { error: credErr } = await sb.from("referrals").update({ status: "credited" })
       .eq("invitee_id", invitee.id);
     if (credErr) throw credErr;
+
+    // Server-authoritative referral events (the inviter's client may never
+    // open the app during the reward — invitee-side accepted/sent are client).
+    void captureServerEvent(invitee.id, "referral_rewarded", {
+      tier: "premium",
+      code,
+      side: "invitee",
+      months: 1,
+    });
+    if (!inviterCapped) {
+      void captureServerEvent(inviter.id, "referral_rewarded", {
+        tier: "premium",
+        code,
+        side: "inviter",
+        months: 1,
+      });
+    }
 
     return json({
       status: "credited",

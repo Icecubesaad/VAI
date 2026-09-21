@@ -146,6 +146,9 @@ async function resolveGarmentIds(
 }
 
 const INGEST_MAX_BYTES = 8 * 1024 * 1024;
+// Base-photo ingest HEAD/download budget (was referenced but never defined —
+// every ingest 500'd at runtime).
+const INGEST_TIMEOUT_MS = 10_000;
 
 /**
  * base_photo_url without an ID: accepts ONLY this project's own private

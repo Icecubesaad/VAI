@@ -24,6 +24,7 @@ import {
   type SubStatus,
 } from "../_shared/billing.ts";
 import { handleOptions, json, requireMethod, toErrorResponse } from "../_shared/http.ts";
+import { captureServerEvent } from "../_shared/posthog.ts";
 
 function mapStore(store: unknown): BillingPlatform | null {
   const s = String(store ?? "").toUpperCase();
@@ -115,6 +116,13 @@ Deno.serve(async (req) => {
     }
     await requireUserExists(sb, appUserId);
 
+    // Previous sub status drives lifecycle event mapping (trial→paid vs churn).
+    const { data: prevSub } = await sb.from("subscriptions")
+      .select("status")
+      .eq("user_id", appUserId)
+      .maybeSingle<{ status: string }>();
+    const prevStatus = prevSub?.status ?? null;
+
     const { deduped } = await upsertSubscription(sb, {
       userId: appUserId,
       platform: mapStore(e.store),
@@ -127,6 +135,39 @@ Deno.serve(async (req) => {
       eventType: type,
       eventId,
     });
+
+    // Server-authoritative revenue lifecycle events — the client can't see
+    // renewals, cancellations or churn (it only observes its own fetches).
+    const lifecycle = (() => {
+      switch (type) {
+        case "RENEWAL":
+        case "PRODUCT_CHANGE":
+        case "UNCANCELLATION":
+          return prevStatus === "trialing"
+            ? { event: "trial_converted", props: {} }
+            : {
+                event: "subscription_renewed",
+                props: { ...(productId ? { product_id: productId } : {}) },
+              };
+        case "CANCELLATION":
+          // Auto-renew off during a trial = trial abandonment; paid plans
+          // keep access until EXPIRATION (churn fires there, not here).
+          return prevStatus === "trialing" ? { event: "trial_cancelled", props: {} } : null;
+        case "EXPIRATION":
+          return prevStatus === "trialing"
+            ? { event: "trial_cancelled", props: {} }
+            : { event: "subscription_churned", props: {} };
+        default:
+          return null;
+      }
+    })();
+    if (lifecycle) {
+      void captureServerEvent(appUserId, lifecycle.event, {
+        tier: "premium",
+        source: "billing-rc",
+        ...lifecycle.props,
+      });
+    }
     return json({ ok: true, deduped, status });
   } catch (e) {
     return toErrorResponse(e);
