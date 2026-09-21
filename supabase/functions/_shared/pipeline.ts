@@ -8,7 +8,7 @@
 // push with keep-best. Failed predictions always cost the user 0.
 
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { GEMINI_FLASH_IMAGE, GEMINI_PRO_IMAGE, GEMINI_STD_COST_USD, generateImage } from "./gemini.ts";
+import { OR_IMAGE_MODEL, GEMINI_STD_COST_USD, generateImage } from "./gemini.ts";
 import { FASHN_MAX_COST_USD, FASHN_STD_COST_USD, pollToDone, runTryon } from "./fashn.ts";
 import { HttpError } from "./http.ts";
 import { logRenderCost, todaySpendUsd } from "./ledger.ts";
@@ -112,24 +112,28 @@ export async function enqueueRender(
   }).select("id,status").single<{ id: string; status: string }>();
   if (error) throw error;
 
-  try {
-    await fireRenderRequested(data.id, input.userId);
-  } catch (e) {
-    // P1-7: never leave a reusable `queued` row nothing will ever process —
-    // the client would cache-hit it forever and the allowance would be gone.
-    // Refund the allowance and remove the row so a retry starts clean.
-    console.error("[pipeline] Inngest enqueue failed — refunding", {
-      renderId: data.id,
-      userId: input.userId,
-      error: (e as Error).message,
-    });
-    await refundAllowance(sb, input.userId, input.pool);
-    await sb.from("renders").delete().eq("id", data.id);
-    throw new HttpError(
-      503,
-      "render_queue_unavailable",
-      "The render queue is momentarily unreachable — try again in a moment.",
-    );
+  // RENDER_INLINE=true (dev / pre-Inngest deployments): skip the queue — the
+  // caller processes the render inline. With Inngest, enqueue as before.
+  if (Deno.env.get("RENDER_INLINE") !== "true") {
+    try {
+      await fireRenderRequested(data.id, input.userId);
+    } catch (e) {
+      // P1-7: never leave a reusable `queued` row nothing will ever process —
+      // the client would cache-hit it forever and the allowance would be gone.
+      // Refund the allowance and remove the row so a retry starts clean.
+      console.error("[pipeline] Inngest enqueue failed — refunding", {
+        renderId: data.id,
+        userId: input.userId,
+        error: (e as Error).message,
+      });
+      await refundAllowance(sb, input.userId, input.pool);
+      await sb.from("renders").delete().eq("id", data.id);
+      throw new HttpError(
+        503,
+        "render_queue_unavailable",
+        "The render queue is momentarily unreachable — try again in a moment.",
+      );
+    }
   }
   return data;
 }
@@ -190,26 +194,24 @@ function providerChain(tier: PipelineTier): string[] {
   //   std → gemini-3.1-flash-image → gemini-3-pro-image → fashn-std
   //   max → gemini-3-pro-image → gemini-3.1-flash-image → fashn-max
   // Max leads with pro (not flash) on purpose: the caller spent an HD-pack
-  // credit for top fidelity, so the highest-fidelity Gemini model goes first;
-  // flash remains the safety fallback before FASHN. `model_hint` from the
+  // One AI leg + FASHN: the founder's mandated image model (OpenRouter
+  // flash-lite) IS the top leg; FASHN remains the safety fallback.
+  // `model_hint` from the
   // client is recorded in render meta for analytics but NEVER reorders this
   // chain — the server owns provider selection and cost attribution.
   return tier === "max"
-    ? [GEMINI_PRO_IMAGE, GEMINI_FLASH_IMAGE, "fashn-max"]
-    : [GEMINI_FLASH_IMAGE, GEMINI_PRO_IMAGE, "fashn-std"];
+    ? [OR_IMAGE_MODEL, "fashn-max"]
+    : [OR_IMAGE_MODEL, "fashn-std"];
 }
 
 function providerCostUsd(provider: string): number {
   if (provider === "fashn-max") return FASHN_MAX_COST_USD;
   if (provider === "fashn-std") return FASHN_STD_COST_USD;
-  // Lite primary ≈ $0.005/img; the (paid) flash-image fallback costs more.
-  if (provider === GEMINI_FLASH_IMAGE) return 0.005;
   return GEMINI_STD_COST_USD;
 }
 
 function providerLabel(provider: string): string {
-  if (provider === GEMINI_FLASH_IMAGE) return "gemini-flash-lite";
-  if (provider === GEMINI_PRO_IMAGE) return "gemini-flash";
+  if (provider === OR_IMAGE_MODEL) return "gemini-flash-image";
   return provider;
 }
 
