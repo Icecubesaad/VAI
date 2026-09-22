@@ -8,13 +8,13 @@
 // push with keep-best. Failed predictions always cost the user 0.
 
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { GEMINI_FLASH_IMAGE, GEMINI_PRO_IMAGE, GEMINI_STD_COST_USD, generateImage } from "./gemini.ts";
+import { OR_IMAGE_MODEL, GEMINI_STD_COST_USD, generateImage } from "./gemini.ts";
 import { FASHN_MAX_COST_USD, FASHN_STD_COST_USD, pollToDone, runTryon } from "./fashn.ts";
 import { HttpError } from "./http.ts";
 import { logRenderCost, todaySpendUsd } from "./ledger.ts";
 import { pushToUser, renderFailedPush, renderReadyPush } from "./push.ts";
 import { refundAllowance, type PoolCode } from "./quota.ts";
-import { signedAssetUrl, signedRenderUrl } from "./storage.ts";
+import { signedAssetUrl } from "./storage.ts";
 
 export const MAX_ATTEMPTS = 3;
 const EST_STD_USD = 0.075;
@@ -134,8 +134,6 @@ export async function enqueueRender(
         "The render queue is momentarily unreachable — try again in a moment.",
       );
     }
-  } else {
-    console.log("[pipeline] RENDER_INLINE — skipping Inngest enqueue", { renderId: data.id });
   }
   return data;
 }
@@ -159,12 +157,11 @@ export function buildTryonPrompt(ctx: PromptCtx): string {
   ].filter(Boolean).join("; ");
   const lines = [
     "Photorealistic virtual try-on. Dress the person from the FIRST image (base photo) in the garment(s) from the reference image(s).",
-    "Hard constraints: preserve the person's face identity, skin tone and body shape. Do not beautify, slim, or age-shift.",
-    "POSE: give the subject a natural, confident editorial pose that suits the outfit and context — full body visible, weight shifted, hands relaxed. Interpret the pose freshly (never an exact copy of the base pose) unless the meta says pose:exact.",
+    "Hard constraints: preserve the person's face identity, skin tone, body shape and pose EXACTLY. Do not beautify, slim, age-shift, or change the background.",
     conditions ? `Match base-photo conditions — ${conditions}.` : null,
     ctx.mode === "compare"
       ? "Output ONE image, two panels side by side: LEFT = the untouched base photo, RIGHT = the try-on result. Thin neutral divider, no text."
-      : "Output ONLY the try-on result on a flat solid white background — clean studio white, no props, no floor shadows.",
+      : "Output ONLY the try-on result, same framing and aspect as the base photo.",
     ctx.priorFailTags.length > 0
       ? `Avoid these prior failures: ${ctx.priorFailTags.join("; ")}.`
       : null,
@@ -194,27 +191,27 @@ interface JobRow {
 function providerChain(tier: PipelineTier): string[] {
   // VERIFIED Sep-2026 (INTEGRATION-REPORT founder decision #1): Gemini is
   // PRIMARY for try-on, FASHN is fallback-only. Order per tier:
-  //   std → gemini-3.1-flash-lite-image → gemini-3.1-flash-image → fashn-std
-  //   max → gemini-3.1-flash-image → gemini-3.1-flash-lite-image → fashn-max
-  // Native Gemini (founder: no OpenRouter). FASHN remains the safety
-  // fallback. `model_hint` from the
+  //   std → gemini-3.1-flash-image → gemini-3-pro-image → fashn-std
+  //   max → gemini-3-pro-image → gemini-3.1-flash-image → fashn-max
+  // Max leads with pro (not flash) on purpose: the caller spent an HD-pack
+  // One AI leg + FASHN: the founder's mandated image model (OpenRouter
+  // flash-lite) IS the top leg; FASHN remains the safety fallback.
+  // `model_hint` from the
   // client is recorded in render meta for analytics but NEVER reorders this
   // chain — the server owns provider selection and cost attribution.
   return tier === "max"
-    ? [GEMINI_PRO_IMAGE, GEMINI_FLASH_IMAGE, "fashn-max"]
-    : [GEMINI_FLASH_IMAGE, GEMINI_PRO_IMAGE, "fashn-std"];
+    ? [OR_IMAGE_MODEL, "fashn-max"]
+    : [OR_IMAGE_MODEL, "fashn-std"];
 }
 
 function providerCostUsd(provider: string): number {
   if (provider === "fashn-max") return FASHN_MAX_COST_USD;
   if (provider === "fashn-std") return FASHN_STD_COST_USD;
-  if (provider === GEMINI_FLASH_IMAGE) return 0.005;
   return GEMINI_STD_COST_USD;
 }
 
 function providerLabel(provider: string): string {
-  if (provider === GEMINI_FLASH_IMAGE) return "gemini-flash-lite";
-  if (provider === GEMINI_PRO_IMAGE) return "gemini-flash";
+  if (provider === OR_IMAGE_MODEL) return "gemini-flash-image";
   return provider;
 }
 
