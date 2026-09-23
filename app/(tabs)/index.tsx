@@ -14,7 +14,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme, tokenColors } from '@/theme';
 import { MeshGradient } from '@/components/MeshGradient';
-import { PressScale, QuotaBadge, SkeletonHero, InspirationStrip } from '@/components';
+import { PressScale, SkeletonHero, InspirationStrip } from '@/components';
 import { LookCard } from '@/components/LookCard';
 import { Icon } from '@/components/icons';
 import { api, apiErrorCopy, type PlannedOutfit, type ReelCard as ReelCardData } from '@/lib/api';
@@ -252,7 +252,8 @@ export default function PlannerHome() {
   // the feed entirely so it can take the full-bleed cover slot. The grid
   // below only carries the other ways to wear the closet.
   const heroEntry = useMemo(() => visible.find((e) => e.isToday) ?? null, [visible]);
-  const gridEntries = useMemo(() => visible.filter((e) => !e.isToday), [visible]);
+  // Grid-first (153012 inspo): today's look leads the masonry as its first card.
+  const gridEntries = useMemo(() => visible, [visible]);
 
   // Two balanced columns for the masonry.
   const columns = useMemo(() => {
@@ -281,7 +282,7 @@ export default function PlannerHome() {
         fallbackUris={garmentUris(e.garmentIds)}
         label={e.label}
         aspect={e.uri ? 3 / 4 : 1}
-        isToday={false}
+        isToday={e.isToday}
         saved={e.saved}
         onSave={e.onSave}
         onPress={e.onPress}
@@ -308,18 +309,12 @@ export default function PlannerHome() {
       >
         {/* Cover masthead: the date as an italic-serif line, hairline rule,
             then the headline as the cover line. Quota + profile stay quiet. */}
+        {/* The 153012 header: brand chip left, search + profile right. */}
         <View style={styles.headerTop}>
-          <Text style={styles.dateLine}>{dateLabel}</Text>
+          <View style={[styles.brandChip, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.brandChipText, { color: colors.text }]}>V</Text>
+          </View>
           <View style={styles.headerRight}>
-            <QuotaBadge
-              left={rendersLeft}
-              cap={quotaCap}
-              onPress={() => {
-                if (tier === 'free') {
-                  router.push({ pathname: '/onboarding/paywall', params: { placement: 'home' } });
-                }
-              }}
-            />
             <Pressable
               onPress={() => router.push('/profile')}
               testID="home-profile"
@@ -332,139 +327,16 @@ export default function PlannerHome() {
             </Pressable>
           </View>
         </View>
-        {/* The masthead — the 153012 inspo's serif title line + quick icons. */}
-        <View style={styles.mastheadRow}>
-          <Text style={[styles.masthead, { color: colors.text }]} testID="home-masthead">
-            Find Your Best Outfit
-          </Text>
-          <View style={styles.headerRight}>
-            <Pressable hitSlop={10} style={styles.profileHit} accessibilityRole="button" accessibilityLabel="Saved looks">
-              <Icon name="heart" color={tokenColors.ink} size={20} strokeWidth={2} />
-            </Pressable>
-            <Pressable hitSlop={10} style={styles.profileHit} accessibilityRole="button" accessibilityLabel="Style my week">
-              <Icon name="sparkles" color={tokenColors.ink} size={20} strokeWidth={2} />
-            </Pressable>
-          </View>
-        </View>
+        {/* The masthead — the 153012 serif title line. */}
+        <Text style={[styles.masthead, { color: colors.text }]} testID="home-masthead">
+          Find Your Best Outfit
+        </Text>
+        <Text style={[styles.dateLine, { color: colors.muted }]}>{dateLabel}</Text>
         <View style={styles.mastheadRule} />
 
         {/* THE COVER — you, wearing today's plan. Full-bleed 4:5, glass chips
             on the photo, the stylist's why-line over the scrim. No render
             yet: the pieces compose the card and the CTA is the point. */}
-        {!outfitQuery.isPending && !outfitQuery.isError && hasClosetBase && heroEntry ? (
-          <View style={styles.heroWrap} testID="home-hero">
-            <PressScale
-              scaleTo={0.98}
-              onPress={heroEntry.onPress}
-              style={[styles.heroCard, !heroEntry.uri ? styles.heroCardDark : null]}
-              testID="home-tryon"
-              accessibilityRole="button"
-              accessibilityLabel={`Today's outfit, ${heroEntry.label}. Open the changing room.`}
-            >
-              {heroEntry.uri ? (
-                <Image
-                  source={{ uri: heroEntry.uri }}
-                  style={styles.heroMedia}
-                  contentFit="cover"
-                  transition={250}
-                  accessibilityLabel="AI photo of you wearing today's outfit"
-                />
-              ) : (
-                <View style={[styles.heroMedia, styles.heroCollage]} testID="home-hero-collage">
-                  <View style={styles.heroCollageGlow} aria-hidden />
-                  {garmentUris(heroEntry.garmentIds).slice(0, 2).map((u, i) => (
-                    <Image
-                      key={u}
-                      source={{ uri: u }}
-                      style={[styles.heroCollageImg, i === 1 ? styles.heroCollageSecond : null]}
-                      contentFit="contain"
-                      transition={150}
-                    />
-                  ))}
-                </View>
-              )}
-
-              {/* top glass chips: Today · weather · event */}
-              <View style={styles.heroChipsRow}>
-                <View style={styles.heroChipToday}>
-                  <Text style={styles.heroChipTodayText}>Today</Text>
-                </View>
-                {!!outfit?.weatherSummary && (
-                  <View style={styles.heroChipGlass} testID="weather-chip">
-                    <Text style={styles.heroChipGlassText}>{outfit.weatherSummary}</Text>
-                  </View>
-                )}
-                {!!outfit?.eventLabel && (
-                  <View style={styles.heroChipGlass} testID="event-chip">
-                    <Text style={styles.heroChipGlassText}>{outfit.eventLabel}</Text>
-                  </View>
-                )}
-              </View>
-              {heroEntry.onSave ? (
-                <PressScale
-                  scaleTo={0.88}
-                  hitSlop={10}
-                  onPress={heroEntry.onSave}
-                  style={styles.heroHeart}
-                  testID="home-hero-save"
-                  accessibilityRole="button"
-                  accessibilityLabel={heroEntry.saved ? 'Remove from saved looks' : "Save today's look"}
-                  accessibilityState={{ selected: heroEntry.saved }}
-                >
-                  <Icon
-                    name={heroEntry.saved ? 'heartSolid' : 'heart'}
-                    color={heroEntry.saved ? '#E34D78' : '#FFFFFF'}
-                    size={19}
-                    strokeWidth={2}
-                  />
-                </PressScale>
-              ) : null}
-
-              {/* bottom: scrim → label → why-line → CTA */}
-              <LinearGradient
-                pointerEvents="none"
-                colors={['rgba(18,12,34,0)', 'rgba(18,12,34,0.52)', 'rgba(18,12,34,0.85)']}
-                locations={[0, 0.45, 1]}
-                style={styles.heroScrim}
-              />
-              <View style={styles.heroOverlay}>
-                <Text style={styles.heroLabel} numberOfLines={1}>
-                  {heroEntry.label}
-                </Text>
-                {!!outfit?.whyLine ? (
-                  <Text style={styles.heroWhy} numberOfLines={2} testID="why-line">
-                    {outfit.whyLine}
-                  </Text>
-                ) : null}
-                <View style={[styles.heroCta, !heroEntry.uri ? styles.heroCtaViolet : null]}>
-                  <Text style={[styles.heroCtaText, !heroEntry.uri ? styles.heroCtaTextViolet : null]}>
-                    {heroEntry.uri ? 'Open the changing room' : 'See it on you'}
-                  </Text>
-                  <Icon name="tryon" color={heroEntry.uri ? tokenColors.stage : '#FFFFFF'} size={16} strokeWidth={2} />
-                </View>
-              </View>
-            </PressScale>
-            {heroEntry.onSave ? (
-              <PressScale
-                scaleTo={0.88}
-                hitSlop={10}
-                onPress={heroEntry.onSave}
-                style={styles.heroHeart}
-                testID="home-hero-save"
-                accessibilityRole="button"
-                accessibilityLabel={heroEntry.saved ? 'Remove from saved looks' : "Save today's look"}
-                accessibilityState={{ selected: heroEntry.saved }}
-              >
-                <Icon
-                  name={heroEntry.saved ? 'heartSolid' : 'heart'}
-                  color={heroEntry.saved ? '#E34D78' : '#FFFFFF'}
-                  size={19}
-                  strokeWidth={2}
-                />
-              </PressScale>
-            ) : null}
-          </View>
-        ) : null}
 
         {/* occasion filters + style my week */}
         <Pressable
@@ -581,9 +453,6 @@ export default function PlannerHome() {
           </View>
         ) : (
           <View testID="home-grid">
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>
-              {heroEntry ? 'More ways to wear it' : 'Ways to wear your closet'}
-            </Text>
             <View style={styles.grid}>
               {columns.map((col, ci) => (
                 <View key={ci} style={styles.column}>
@@ -644,17 +513,17 @@ export default function PlannerHome() {
         />
 
         {/* My Items — the inspo's bottom rack: mini thumbs + add new. */}
-        <View style={[styles.myItems, { backgroundColor: colors.surface, borderColor: colors.border }]} testID="my-items">
+        <View style={[styles.myItems, { backgroundColor: tokenColors.ink }]} testID="my-items">
           <View style={styles.myItemsHead}>
             <Text style={[styles.myItemsTitle, { color: colors.text }]}>My Items</Text>
             <Pressable
               onPress={() => router.push('/(tabs)/closet')}
-              style={[styles.addItem, { backgroundColor: colors.primary }]}
+              style={[styles.addItem, { backgroundColor: colors.text }]}
               testID="my-items-add"
               accessibilityRole="button"
               accessibilityLabel="Add new items to your closet"
             >
-              <Text style={[styles.addItemText, { color: colors.onPrimary }]}>Add new</Text>
+              <Text style={[styles.addItemText, { color: tokenColors.ink }]}>Add new</Text>
             </Pressable>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.myItemsThumbs}>
@@ -680,7 +549,14 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  mastheadRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 2, marginBottom: 12 },
+  brandChip: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  brandChipText: { fontSize: 17, fontWeight: '700', fontFamily: 'PlayfairDisplay_700Bold' },
   masthead: {
     fontSize: 30,
     lineHeight: 36,
