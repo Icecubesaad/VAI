@@ -197,10 +197,11 @@ export default function PlannerHome() {
         onPress: () => {
           void hapticFor.select();
           router.push({
-            pathname: '/tryon',
+            pathname: '/look',
             params: {
               outfitId: outfit.id,
               garmentIds: outfit.garmentIds.join(','),
+              label: comboLabel(outfit.garmentIds, garments),
             },
           });
         },
@@ -224,8 +225,8 @@ export default function PlannerHome() {
         onPress: () => {
           void hapticFor.select();
           router.push({
-            pathname: '/tryon',
-            params: { garmentIds: c.garmentIds.join(',') },
+            pathname: '/look',
+            params: { garmentIds: c.garmentIds.join(','), label: c.label },
           });
         },
         onSave: reelMatch
