@@ -43,6 +43,10 @@ export default function TabsLayout() {
         options={{ title: 'Profile', tabBarIcon: ({ color, size }) => <Icon name="profile" color={color as string} size={size} /> }}
       />
       <Tabs.Screen
+        name="mix"
+        options={{ title: 'Mix', tabBarIcon: ({ color, size }) => <Icon name="tryon" color={color as string} size={size} /> }}
+      />
+      <Tabs.Screen
         name="shop"
         options={{ title: 'Shop', tabBarIcon: ({ color, size }) => <Icon name="shop" color={color as string} size={size} /> }}
       />

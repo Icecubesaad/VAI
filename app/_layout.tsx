@@ -494,6 +494,7 @@ export default function RootLayout() {
               <Stack.Screen name="(tabs)" />
               <Stack.Screen name="profile" />
               <Stack.Screen name="tryon" />
+              <Stack.Screen name="look" />
               <Stack.Screen name="onboarding" />
             </Stack>
           </QueryClientProvider>
