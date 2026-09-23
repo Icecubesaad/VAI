@@ -9,6 +9,7 @@ import { hapticFor } from '@/lib/haptics';
 import { useSession } from '@/store/session';
 import { useCloset, selectClosetList } from '@/store/closet';
 import { usePaywall } from '@/store/paywall';
+import { mockGarment, mockLookRender } from '@/lib/mock-visuals';
 
 const POLL_MS = 4000;
 const POLL_TIMEOUT_MS = 95_000;
@@ -31,13 +32,25 @@ export default function LookScreen() {
   const garmentIds = (first(params.garmentIds) ?? '').split(',').filter(Boolean);
   const label = first(params.label) ?? 'Your ensemble';
   const why = first(params.why) ?? null;
-  const picked = (garmentIds.length > 0 ? garmentIds : garments.slice(0, 3).map((g) => g.id))
+  const pickedRaw = (garmentIds.length > 0 ? garmentIds : garments.slice(0, 3).map((g) => g.id))
     .map((id) => garments.find((g) => g.id === id))
     .filter((g): g is NonNullable<typeof g> => !!g);
+  // Dev-only: with no closet data the page still demonstrates its final look —
+  // mock chips + a one-tap mock render (clearly watermarked, never shipped).
+  const picked = pickedRaw.length > 0
+    ? pickedRaw
+    : __DEV__
+      ? [
+          { id: 'mock-1', imageUrl: mockGarment('#6B2E44', 'dress'), cutoutUrl: null },
+          { id: 'mock-2', imageUrl: mockGarment('#C9BDC2', 'top'), cutoutUrl: null },
+          { id: 'mock-3', imageUrl: mockGarment('#3A2331', 'shoes'), cutoutUrl: null },
+        ]
+      : [];
 
   const [phase, setPhase] = useState<'idle' | 'rendering' | 'done' | 'failed'>('idle');
   const [uri, setUri] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [mockUri, setMockUri] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stopPoll = () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
   useEffect(() => () => stopPoll(), []);
@@ -140,6 +153,8 @@ export default function LookScreen() {
 
         {phase === 'done' && uri ? (
           <Image source={{ uri }} style={styles.hero} testID="look-image" />
+        ) : phase === 'done' && mockUri ? (
+          <Image source={{ uri: mockUri }} style={styles.hero} testID="look-mock-image" />
         ) : phase === 'rendering' ? (
           <View style={[styles.hero, styles.heroBusy]} testID="look-rendering">
             <ActivityIndicator color="#F3ECE4" />
@@ -161,6 +176,20 @@ export default function LookScreen() {
             >
               <Text style={styles.aiPillText}>✦ AI OUTFIT</Text>
             </Pressable>
+            {__DEV__ && (
+              <Pressable
+                onPress={() => {
+                  void hapticFor.select();
+                  setMockUri(mockLookRender(label));
+                  setPhase('done');
+                }}
+                testID="look-mock-preview"
+                accessibilityRole="button"
+                accessibilityLabel="Preview the finished layout with a mock render (dev only)"
+              >
+                <Text style={styles.mockLink}>Preview mock layout (dev)</Text>
+              </Pressable>
+            )}
           </View>
         )}
 
@@ -222,4 +251,5 @@ const styles = StyleSheet.create({
   },
   close: { alignSelf: 'center', paddingVertical: 10, paddingHorizontal: 22, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.08)' },
   closeGlyph: { color: '#F3ECE4', fontSize: 15, fontWeight: '700' },
+  mockLink: { color: 'rgba(243,236,228,0.55)', fontSize: 12, textDecorationLine: 'underline' },
 });
