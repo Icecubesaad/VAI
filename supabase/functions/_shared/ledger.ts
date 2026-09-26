@@ -4,11 +4,21 @@
 
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
-export type LedgerType = "sub" | "affiliate_cashback" | "referral_credit" | "render_cost";
+export type LedgerType =
+  | "sub"
+  | "affiliate_cashback"
+  | "referral_credit"
+  | "render_cost";
 
 export async function writeLedger(
   sb: SupabaseClient,
-  entry: { userId: string; type: LedgerType; amountCents: number; meta?: Record<string, unknown> },
+  entry: {
+    userId: string;
+    type: LedgerType;
+    amountCents: number;
+    meta?: Record<string, unknown>;
+    required?: boolean;
+  },
 ): Promise<void> {
   const { error } = await sb.from("ledger").insert({
     user_id: entry.userId,
@@ -16,7 +26,14 @@ export async function writeLedger(
     amount_cents: entry.amountCents,
     meta: entry.meta ?? {},
   });
-  if (error) console.error("[ledger] write failed", { ...entry, error: error.message });
+  if (error) {
+    const { required, ...loggedEntry } = entry;
+    console.error("[ledger] write failed", {
+      ...loggedEntry,
+      error: error.message,
+    });
+    if (required) throw error;
+  }
 }
 
 export async function logRenderCost(
@@ -29,19 +46,27 @@ export async function logRenderCost(
     pool: string;
     costUsd: number;
     latencyMs: number;
+    gpuRuntimeSeconds?: number;
+    required?: boolean;
   },
 ): Promise<void> {
+  const meta: Record<string, unknown> = {
+    render_id: opts.renderId,
+    provider: opts.provider,
+    tier: opts.tier,
+    pool: opts.pool,
+    latency_ms: opts.latencyMs,
+  };
+  if (opts.gpuRuntimeSeconds !== undefined) {
+    meta.worker_runtime_seconds = opts.gpuRuntimeSeconds;
+    meta.cost_basis = "worker_runtime_plus_startup_reserve";
+  }
   await writeLedger(sb, {
     userId: opts.userId,
     type: "render_cost",
     amountCents: -Math.round(opts.costUsd * 100),
-    meta: {
-      render_id: opts.renderId,
-      provider: opts.provider,
-      tier: opts.tier,
-      pool: opts.pool,
-      latency_ms: opts.latencyMs,
-    },
+    meta,
+    required: opts.required,
   });
 }
 
@@ -51,7 +76,12 @@ export async function logReferralGrant(
   userId: string,
   meta: Record<string, unknown>,
 ): Promise<void> {
-  await writeLedger(sb, { userId, type: "referral_credit", amountCents: 0, meta });
+  await writeLedger(sb, {
+    userId,
+    type: "referral_credit",
+    amountCents: 0,
+    meta,
+  });
 }
 
 /** Credit-pack purchase memo (revenue truth lives in RevenueCat/Stripe webhooks). */
@@ -60,7 +90,12 @@ export async function logPackPurchase(
   userId: string,
   meta: { pack: string; std?: number; hd?: number; platform: string },
 ): Promise<void> {
-  await writeLedger(sb, { userId, type: "sub", amountCents: 0, meta: { kind: "pack", ...meta } });
+  await writeLedger(sb, {
+    userId,
+    type: "sub",
+    amountCents: 0,
+    meta: { kind: "pack", ...meta },
+  });
 }
 
 /** Sum of today's render COGS in USD (for MAX_DAILY_SPEND_USD guard). */

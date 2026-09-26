@@ -263,6 +263,7 @@ export async function tryon(
   if (params.garments.length === 0) throw new Error('tryon requires at least one garment reference.');
   const tier = params.tier ?? 'std';
   const resolution = params.resolution ?? TIER_DEFAULT_RESOLUTION[tier];
+  const qaModalRequested = process.env.EXPO_PUBLIC_QA_MODAL_PROVIDER === 'modal-qwen-qa';
   const baseKey = params.basePhotoId ?? params.basePhotoUrl;
   if (!baseKey) throw new Error('tryon requires basePhotoId or basePhotoUrl.');
   const day = params.day ?? todayDay();
@@ -285,6 +286,9 @@ export async function tryon(
     model_hint: PRIMARY_IMAGE_MODEL,
     outfit_id: params.outfitId,
     day,
+    ...(process.env.EXPO_PUBLIC_QA_MODAL_PROVIDER === 'modal-qwen-qa'
+      ? { qa_provider: 'modal-qwen-qa' }
+      : {}),
   };
 
   // Attempt 1: primary model.
@@ -293,11 +297,13 @@ export async function tryon(
       timeoutMs: 30_000,
       retries: tier === 'std' ? 1 : 0,
       ...edgeOpts,
+      ...(qaModalRequested ? { retries: 0 } : {}),
       idempotencyKey,
     });
     return toTryOnResult(res, { tier, resolution, idempotencyKey, attempts: 1, fallback: PRIMARY_IMAGE_MODEL });
   } catch (firstErr) {
     const eligible =
+      !qaModalRequested &&
       params.allowFallback !== false &&
       isFallbackEligible(firstErr);
     if (!eligible) throw firstErr;

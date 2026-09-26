@@ -29,6 +29,23 @@
         "resourceClass": "medium"
       }
     },
+    "qa-modal": {
+      "distribution": "internal",
+      "channel": "qa-modal",
+      "env": {
+        "APP_ENV": "preview",
+        "EXPO_PUBLIC_APP_ENV": "preview",
+        "EXPO_PUBLIC_QA_MODAL_PROVIDER": "modal-qwen-qa",
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
+      },
+      "android": {
+        "buildType": "apk",
+        "resourceClass": "medium"
+      },
+      "ios": {
+        "resourceClass": "medium"
+      }
+    },
     "production": {
       "distribution": "store",
       "channel": "production",

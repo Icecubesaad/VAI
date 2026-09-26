@@ -834,12 +834,14 @@ export const api = {
     /** Pose-marked Pinterest pin id (required when poseMode is 'adapt'). */
     poseRefId?: string;
   }): Promise<RenderJob> => {
+    const qaModalRequested = process.env.EXPO_PUBLIC_QA_MODAL_PROVIDER === 'modal-qwen-qa';
     const req: Record<string, unknown> = {
       garment_refs: body.garmentRefs,
       mode: body.mode,
       tier: body.tier,
       idempotency_key: body.idempotencyKey,
     };
+    if (qaModalRequested) req['qa_provider'] = 'modal-qwen-qa';
     if (body.outfitId) req['outfit_id'] = body.outfitId;
     if (body.basePhotoId) req['base_photo_id'] = body.basePhotoId;
     if (body.day) req['day'] = body.day;
@@ -868,7 +870,9 @@ export const api = {
     /** Pose-marked Pinterest pin id (required when poseMode is 'adapt'). */
     poseRefId?: string;
   }): Promise<RenderJob> => {
+    const qaModalRequested = process.env.EXPO_PUBLIC_QA_MODAL_PROVIDER === 'modal-qwen-qa';
     const req: Record<string, unknown> = { render_id: body.renderId, note: body.note };
+    if (qaModalRequested) req['qa_provider'] = 'modal-qwen-qa';
     if (body.idempotencyKey) req['idempotency_key'] = body.idempotencyKey;
     if (body.poseMode) req['pose_mode'] = body.poseMode;
     if (body.poseRefId) req['pose_ref_id'] = body.poseRefId;

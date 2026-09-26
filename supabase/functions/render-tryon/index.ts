@@ -43,23 +43,51 @@
 // hd_requires_pack otherwise). compare = ONE Max render, tiled single image.
 
 import { admin, requireUser, supabaseUrl } from "../_shared/auth.ts";
-import { badRequest, getIdempotencyKey, handleOptions, HttpError, json, paymentRequired, readJson, requireMethod, toErrorResponse } from "../_shared/http.ts";
-import { buildRenderKey, findRenderByKey, isReusableRow, type RenderRow } from "../_shared/idempotency.ts";
+import {
+  badRequest,
+  getIdempotencyKey,
+  handleOptions,
+  HttpError,
+  json,
+  paymentRequired,
+  readJson,
+  requireMethod,
+  toErrorResponse,
+} from "../_shared/http.ts";
+import {
+  buildRenderKey,
+  findRenderByKey,
+  isReusableRow,
+  type RenderRow,
+} from "../_shared/idempotency.ts";
 import { renderCostUsd } from "../_shared/ledger.ts";
 import {
+  modalQaConfigForUser,
+  QA_MODAL_PROVIDER,
+} from "../_shared/modal-qa.ts";
+import {
   enqueueRender,
+  fireRenderRequested,
+  type PipelineTier,
   processRender,
   verifyInngestSignature,
-  type PipelineTier,
 } from "../_shared/pipeline.ts";
 import { parsePoseMode, resolvePoseRef } from "../_shared/pinterest.ts";
-import { consumeAllowance, getEntitlementState, refundAllowance, todayISO, type PoolCode } from "../_shared/quota.ts";
+import {
+  consumeAllowance,
+  getEntitlementState,
+  type PoolCode,
+  refundAllowance,
+  todayISO,
+} from "../_shared/quota.ts";
 import { requestRestyle } from "../_shared/restyle.ts";
 import { signedRenderUrl } from "../_shared/storage.ts";
 
 type LooseBody = Record<string, unknown>;
 
-const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
+const str = (
+  v: unknown,
+): string | null => (typeof v === "string" && v.length > 0 ? v : null);
 const firstStr = (...vs: unknown[]): string | null => {
   for (const v of vs) {
     const s = str(v);
@@ -86,13 +114,19 @@ async function resolveGarmentIds(
 ): Promise<{ outfitId: string | null; garmentIds: string[] }> {
   const outfitId = firstStr(body.outfit_id, body.outfitId);
   if (outfitId) {
-    const { data, error } = await sb.from("outfits").select("garment_ids").eq("id", outfitId)
+    const { data, error } = await sb.from("outfits").select("garment_ids").eq(
+      "id",
+      outfitId,
+    )
       .eq("user_id", userId).maybeSingle<{ garment_ids: string[] }>();
-    if (error || !data) throw badRequest("outfit_not_found", "Outfit not found");
+    if (error || !data) {
+      throw badRequest("outfit_not_found", "Outfit not found");
+    }
     return { outfitId, garmentIds: data.garment_ids ?? [] };
   }
 
-  const raw = body.garment_refs ?? body.garmentRefs ?? body.garment_ids ?? body.garmentIds ?? null;
+  const raw = body.garment_refs ?? body.garmentRefs ?? body.garment_ids ??
+    body.garmentIds ?? null;
   const list: unknown[] = Array.isArray(raw) ? raw : [];
   const ids: string[] = [];
   const urls: string[] = [];
@@ -118,9 +152,14 @@ async function resolveGarmentIds(
   // closed — we never render someone else's (or a nonexistent) garment.
   if (urls.length > 0) {
     const { data, error } = await sb.from("garments")
-      .select("id,image_url,cutout_url").eq("user_id", userId).is("deleted_at", null);
+      .select("id,image_url,cutout_url").eq("user_id", userId).is(
+        "deleted_at",
+        null,
+      );
     if (error) throw error;
-    const rows = (data ?? []) as Array<{ id: string; image_url: string | null; cutout_url: string | null }>;
+    const rows = (data ?? []) as Array<
+      { id: string; image_url: string | null; cutout_url: string | null }
+    >;
     const byUrl = new Map<string, string>();
     for (const g of rows) {
       if (g.image_url) byUrl.set(g.image_url, g.id);
@@ -128,15 +167,30 @@ async function resolveGarmentIds(
     }
     for (const u of urls) {
       const hit = byUrl.get(u);
-      if (!hit) throw badRequest("garment_not_found", "A garment URL doesn't match your closet — sync the closet and retry");
+      if (!hit) {
+        throw badRequest(
+          "garment_not_found",
+          "A garment URL doesn't match your closet — sync the closet and retry",
+        );
+      }
       ids.push(hit);
     }
   }
 
   const unique = [...new Set(ids)];
-  if (unique.length === 0) throw badRequest("garments_required", "Provide outfit_id or garment_ids / garment_refs");
-  if (unique.length > 6) throw badRequest("too_many_garments", "Max 6 garments per render");
-  const { data, error } = await sb.from("garments").select("id").eq("user_id", userId)
+  if (unique.length === 0) {
+    throw badRequest(
+      "garments_required",
+      "Provide outfit_id or garment_ids / garment_refs",
+    );
+  }
+  if (unique.length > 6) {
+    throw badRequest("too_many_garments", "Max 6 garments per render");
+  }
+  const { data, error } = await sb.from("garments").select("id").eq(
+    "user_id",
+    userId,
+  )
     .in("id", unique).is("deleted_at", null);
   if (error) throw error;
   if ((data ?? []).length !== unique.length) {
@@ -178,41 +232,66 @@ async function ingestBasePhotoUrl(
       return "";
     }
   })();
-  const m = /^\/storage\/v1\/object\/(?:authenticated\/|sign\/[^/]+\/)?base\/(.+)$/.exec(
-    parsed.pathname,
-  );
+  const m =
+    /^\/storage\/v1\/object\/(?:authenticated\/|sign\/[^/]+\/)?base\/(.+)$/
+      .exec(
+        parsed.pathname,
+      );
   if (!projectHost || parsed.host !== projectHost || !m) {
-    throw badRequest("base_url_invalid", "base_photo_url must be a VAI storage URL");
+    throw badRequest(
+      "base_url_invalid",
+      "base_photo_url must be a VAI storage URL",
+    );
   }
   const objectPath = decodeURIComponent(m[1]!);
   if (!objectPath.startsWith(`${userId}/`)) {
-    throw badRequest("base_url_forbidden", "base_photo_url must live under your own storage prefix");
+    throw badRequest(
+      "base_url_forbidden",
+      "base_photo_url must live under your own storage prefix",
+    );
   }
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), INGEST_TIMEOUT_MS);
   try {
-    const { data: blob, error: dlErr } = await sb.storage.from("base").download(objectPath);
-    if (dlErr || !blob) throw badRequest("base_url_unfetchable", "base_photo_url does not resolve to a stored photo");
-    if (blob.size > INGEST_MAX_BYTES) throw badRequest("base_url_too_large", "Base photo exceeds 8MB");
+    const { data: blob, error: dlErr } = await sb.storage.from("base").download(
+      objectPath,
+    );
+    if (dlErr || !blob) {
+      throw badRequest(
+        "base_url_unfetchable",
+        "base_photo_url does not resolve to a stored photo",
+      );
+    }
+    if (blob.size > INGEST_MAX_BYTES) {
+      throw badRequest("base_url_too_large", "Base photo exceeds 8MB");
+    }
   } catch (e) {
     if (e instanceof HttpError) throw e;
     if (e instanceof Error && e.name === "AbortError") {
       throw badRequest("base_url_unfetchable", "Base photo check timed out");
     }
-    throw badRequest("base_url_unfetchable", "base_photo_url does not resolve to a stored photo");
+    throw badRequest(
+      "base_url_unfetchable",
+      "base_photo_url does not resolve to a stored photo",
+    );
   } finally {
     clearTimeout(timer);
   }
 
-  const { data: active } = await sb.from("base_photos").select("id").eq("user_id", userId)
+  const { data: active } = await sb.from("base_photos").select("id").eq(
+    "user_id",
+    userId,
+  )
     .eq("is_active", true).limit(1).maybeSingle<{ id: string }>();
   const { data: row, error: insErr } = await sb.from("base_photos").insert({
     user_id: userId,
     url: objectPath,
     is_active: !active,
   }).select("id").single<{ id: string }>();
-  if (insErr || !row) throw badRequest("base_ingest_failed", "Could not register base photo");
+  if (insErr || !row) {
+    throw badRequest("base_ingest_failed", "Could not register base photo");
+  }
   return row.id;
 }
 
@@ -225,14 +304,24 @@ async function resolveBasePhotoId(
   if (id) {
     const { data: bp } = await sb.from("base_photos").select("id").eq("id", id)
       .eq("user_id", userId).maybeSingle();
-    if (!bp) throw badRequest("base_not_found", "Base photo not found — retake your selfie");
+    if (!bp) {
+      throw badRequest(
+        "base_not_found",
+        "Base photo not found — retake your selfie",
+      );
+    }
     return id;
   }
   const url = firstStr(body.base_photo_url, body.basePhotoUrl);
   if (url) return await ingestBasePhotoUrl(sb, userId, url);
-  const { data: active } = await sb.from("base_photos").select("id").eq("user_id", userId)
+  const { data: active } = await sb.from("base_photos").select("id").eq(
+    "user_id",
+    userId,
+  )
     .eq("is_active", true).limit(1).maybeSingle<{ id: string }>();
-  if (!active) throw badRequest("base_missing", "Take your mirror selfie first");
+  if (!active) {
+    throw badRequest("base_missing", "Take your mirror selfie first");
+  }
   return active.id;
 }
 
@@ -259,6 +348,136 @@ async function statusPayload(
   }
   if (row.status === "failed") out.error_code = "render_failed";
   return out;
+}
+
+async function resumeModalQaDispatch(
+  sb: ReturnType<typeof admin>,
+  userId: string,
+  row: RenderRow,
+): Promise<void> {
+  const meta = row.garment_refs?.meta ?? {};
+  const usageDay = typeof meta.qa_modal_usage_day === "string"
+    ? meta.qa_modal_usage_day
+    : null;
+  if (!usageDay) {
+    throw new HttpError(
+      503,
+      "qa_modal_state_invalid",
+      "The QA render cannot be safely resumed.",
+    );
+  }
+
+  if (!meta.qa_modal_started_at && usageDay !== todayISO()) {
+    const { data: expired, error: expireError } = await sb.rpc(
+      "abort_qa_modal_render",
+      {
+        p_user_id: userId,
+        p_day: usageDay,
+        p_request_key: row.idempotency_key,
+        p_render_id: row.id,
+      },
+    );
+    if (expireError) {
+      throw new HttpError(
+        503,
+        "qa_modal_expiry_unavailable",
+        "The expired QA request could not be safely closed.",
+      );
+    }
+    if (expired === "aborted") {
+      throw new HttpError(
+        409,
+        "qa_modal_request_expired",
+        "This QA request expired before dispatch. Start a new try-on.",
+      );
+    }
+    if (expired !== "claimed" && expired !== "terminal") {
+      throw new HttpError(
+        503,
+        "qa_modal_dispatch_uncertain",
+        "Retry the QA request with the same key.",
+      );
+    }
+  }
+
+  if (!meta.qa_modal_started_at && typeof meta.qa_modal_claim_id !== "string") {
+    const { data: reserved, error: reserveError } = await sb.rpc(
+      "consume_qa_modal_slot",
+      {
+        p_user_id: userId,
+        p_day: usageDay,
+        p_request_key: row.idempotency_key,
+      },
+    );
+    if (reserveError) {
+      throw new HttpError(
+        503,
+        "qa_modal_limits_unavailable",
+        "Modal QA limits could not be verified.",
+      );
+    }
+    if (reserved !== true) {
+      const { data: abortStatus, error: abortError } = await sb.rpc(
+        "abort_qa_modal_render",
+        {
+          p_user_id: userId,
+          p_day: usageDay,
+          p_request_key: row.idempotency_key,
+          p_render_id: row.id,
+        },
+      );
+      if (abortError) {
+        throw new HttpError(
+          503,
+          "qa_modal_cleanup_unavailable",
+          "The QA request could not be safely resumed.",
+        );
+      }
+      if (abortStatus === "aborted") {
+        throw new HttpError(
+          429,
+          "qa_modal_daily_limit",
+          "The Modal QA daily test limit has been reached.",
+        );
+      }
+      if (abortStatus !== "claimed" && abortStatus !== "terminal") {
+        throw new HttpError(
+          503,
+          "qa_modal_dispatch_uncertain",
+          "Retry the QA request with the same key.",
+        );
+      }
+    }
+  }
+
+  try {
+    await fireRenderRequested(row.id, userId);
+  } catch {
+    const { data: abortStatus, error: abortError } = await sb.rpc(
+      "abort_qa_modal_render",
+      {
+        p_user_id: userId,
+        p_day: usageDay,
+        p_request_key: row.idempotency_key,
+        p_render_id: row.id,
+      },
+    );
+    if (!abortError && abortStatus === "aborted") {
+      throw new HttpError(
+        503,
+        "render_queue_unavailable",
+        "The render queue is momentarily unreachable.",
+      );
+    }
+    if (
+      !abortError && (abortStatus === "claimed" || abortStatus === "terminal")
+    ) return;
+    throw new HttpError(
+      503,
+      "qa_modal_dispatch_uncertain",
+      "Retry the QA request with the same key.",
+    );
+  }
 }
 
 Deno.serve(async (req) => {
@@ -295,7 +514,9 @@ Deno.serve(async (req) => {
         throw badRequest("sync_disabled", "Sync renders are dev-only");
       }
       const user = await requireUser(req);
-      const body = await readJson<{ render_id?: string; renderId?: string }>(req);
+      const body = await readJson<{ render_id?: string; renderId?: string }>(
+        req,
+      );
       const rid = body.render_id ?? body.renderId;
       if (!rid) throw badRequest("render_required", "render_id required");
       const sb = admin();
@@ -311,7 +532,8 @@ Deno.serve(async (req) => {
         }
       }
       const { data: done } = await sb.from("renders")
-        .select("id,user_id,status,output_url,output_path,error").eq("id", rid).single<{
+        .select("id,user_id,status,output_url,output_path,error").eq("id", rid)
+        .single<{
           id: string;
           user_id: string;
           status: string;
@@ -352,30 +574,76 @@ Deno.serve(async (req) => {
     // -> { renders: { [outfit_id]: { render_id, output_url, created_at } } }
     if (body.action === "outfit-status") {
       const rawIds = Array.isArray(body.outfit_ids) ? body.outfit_ids : [];
-      const ids = [...new Set(rawIds.filter((x): x is string => typeof x === "string" && x.length > 0))].slice(0, 10);
+      const ids = [
+        ...new Set(
+          rawIds.filter((x): x is string =>
+            typeof x === "string" && x.length > 0
+          ),
+        ),
+      ].slice(0, 10);
       if (ids.length === 0) return json({ renders: {} });
       const { data: rows } = await sb.from("renders").select(
         "id,outfit_id,status,output_url,output_path,created_at",
       ).eq("user_id", user.id).eq("status", "done").in("outfit_id", ids)
         .order("created_at", { ascending: false });
-      const out: Record<string, { render_id: string; output_url: string; created_at: string }> = {};
-      for (const r of (rows ?? []) as Array<{
-        id: string; outfit_id: string | null; status: string;
-        output_url: string | null; output_path: string | null; created_at: string;
-      }>) {
+      const out: Record<
+        string,
+        { render_id: string; output_url: string; created_at: string }
+      > = {};
+      for (
+        const r of (rows ?? []) as Array<{
+          id: string;
+          outfit_id: string | null;
+          status: string;
+          output_url: string | null;
+          output_path: string | null;
+          created_at: string;
+        }>
+      ) {
         if (!r.outfit_id || out[r.outfit_id]) continue; // first = newest
-        const url = r.output_path ? await signedRenderUrl(sb, user.id, r.output_path) : r.output_url;
-        if (url) out[r.outfit_id] = { render_id: r.id, output_url: url, created_at: r.created_at };
+        const url = r.output_path
+          ? await signedRenderUrl(sb, user.id, r.output_path)
+          : r.output_url;
+        if (url) {
+          out[r.outfit_id] = {
+            render_id: r.id,
+            output_url: url,
+            created_at: r.created_at,
+          };
+        }
       }
       return json({ renders: out });
     }
 
     const mode = str(body.mode) ?? "tryon";
+    if (
+      body.qa_provider !== undefined && body.qa_provider !== QA_MODAL_PROVIDER
+    ) {
+      throw badRequest("qa_provider_invalid", "Unsupported QA provider");
+    }
+    const modalQaRequested = body.qa_provider === QA_MODAL_PROVIDER;
+    if (modalQaRequested && mode !== "tryon") {
+      throw badRequest(
+        "qa_mode_invalid",
+        "Modal QA is available for standard try-on only",
+      );
+    }
 
     // Pose (0005): validated + resolved BEFORE any money moves. Fail closed.
     const poseMode = parsePoseMode(body.pose_mode ?? body.poseMode);
     const poseRefId = firstStr(body.pose_ref_id, body.poseRefId, body.pose_ref);
-    const poseRef = poseRefId ? await resolvePoseRef(sb, user.id, poseRefId) : null;
+    if (modalQaRequested && (poseMode !== "keep" || poseRefId)) {
+      throw badRequest(
+        "qa_pose_unsupported",
+        "Modal QA does not support pose transfer",
+      );
+    }
+    const poseRef = poseRefId
+      ? await resolvePoseRef(sb, user.id, poseRefId)
+      : null;
+    const modalQaConfig = modalQaRequested
+      ? modalQaConfigForUser(user.id)
+      : null;
 
     // Restyle THROUGH render-tryon: same core, caps, and cost as POST /restyle.
     if (mode === "restyle") {
@@ -384,9 +652,12 @@ Deno.serve(async (req) => {
         note: str(body.note) ?? "",
         rewrittenPrompt: str(body.rewritten_prompt),
         promptTags: Array.isArray(body.prompt_tags)
-          ? (body.prompt_tags as unknown[]).filter((t): t is string => typeof t === "string")
+          ? (body.prompt_tags as unknown[]).filter((t): t is string =>
+            typeof t === "string"
+          )
           : undefined,
-        photoConditions: body.photo_conditions !== null && typeof body.photo_conditions === "object"
+        photoConditions: body.photo_conditions !== null &&
+            typeof body.photo_conditions === "object"
           ? body.photo_conditions as Record<string, unknown>
           : undefined,
         tierHint: str(body.tier),
@@ -405,9 +676,23 @@ Deno.serve(async (req) => {
     // Compare = ONE Max render, single tiled image (never 3 renders).
     let tier = (str(body.tier) ?? "std") as PipelineTier;
     if (mode === "compare") tier = "max";
-    if (tier !== "std" && tier !== "max") throw badRequest("tier_invalid", "tier must be std|max");
+    if (tier !== "std" && tier !== "max") {
+      throw badRequest("tier_invalid", "tier must be std|max");
+    }
+    if (modalQaRequested && tier !== "std") {
+      throw badRequest(
+        "qa_tier_invalid",
+        "Modal QA is limited to the standard tier",
+      );
+    }
 
     const { outfitId, garmentIds } = await resolveGarmentIds(sb, user.id, body);
+    if (modalQaRequested && garmentIds.length > 2) {
+      throw badRequest(
+        "qa_too_many_garments",
+        "Modal QA accepts at most two garments",
+      );
+    }
 
     // Base photo must exist (explicit id, ingested URL, or active) before money.
     const basePhotoId = await resolveBasePhotoId(sb, user.id, body);
@@ -416,9 +701,12 @@ Deno.serve(async (req) => {
     // Pose participates via promptHash so keep/adapt never collide; the
     // default (keep, no ref) omits it so legacy keys stay stable.
     const dayRaw = str(body.day);
-    const day = dayRaw && /^\d{4}-\d{2}-\d{2}$/.test(dayRaw) ? dayRaw : todayISO();
+    const day = dayRaw && /^\d{4}-\d{2}-\d{2}$/.test(dayRaw)
+      ? dayRaw
+      : todayISO();
+    const qaUsageDay = modalQaRequested ? todayISO() : null;
     const clientKey = getIdempotencyKey(req, body);
-    const key = clientKey ?? await buildRenderKey({
+    const keyInput = {
       userId: user.id,
       basePhotoId,
       outfitId,
@@ -426,12 +714,59 @@ Deno.serve(async (req) => {
       day,
       mode,
       tier,
-      ...(poseRef || poseMode !== "keep"
-        ? { promptHash: `${poseMode}:${poseRef?.poseRefId ?? ""}` }
-        : {}),
-    });
-    const existing = await findRenderByKey(sb, user.id, key);
+    };
+    const key = modalQaRequested
+      ? await buildRenderKey({
+        ...keyInput,
+        promptHash: `${QA_MODAL_PROVIDER}:${clientKey ?? ""}`,
+      })
+      : clientKey ?? await buildRenderKey({
+        ...keyInput,
+        ...(poseRef || poseMode !== "keep"
+          ? { promptHash: `${poseMode}:${poseRef?.poseRefId ?? ""}` }
+          : {}),
+      });
+    let existing = await findRenderByKey(sb, user.id, key);
+    if (existing && modalQaRequested && existing.status === "failed") {
+      const failedUsageDay = existing.garment_refs?.meta?.qa_modal_usage_day;
+      if (typeof failedUsageDay === "string") {
+        const { data: reset, error: resetError } = await sb.rpc(
+          "reset_retryable_qa_modal_render",
+          {
+            p_user_id: user.id,
+            p_day: failedUsageDay,
+            p_request_key: key,
+          },
+        );
+        if (resetError) {
+          throw new HttpError(
+            503,
+            "qa_modal_retry_unavailable",
+            "The previous QA attempt could not be recovered.",
+          );
+        }
+        if (reset === true) existing = null;
+      }
+      if (existing) {
+        return json({
+          ...(await statusPayload(sb, existing)),
+          idempotency_key: key,
+          cached: true,
+        }, 200);
+      }
+    }
     if (existing && isReusableRow(existing)) {
+      if (modalQaRequested && existing.status !== "done") {
+        await resumeModalQaDispatch(sb, user.id, existing);
+        existing = await findRenderByKey(sb, user.id, key);
+        if (!existing) {
+          throw new HttpError(
+            503,
+            "render_missing",
+            "The QA render could not be recovered.",
+          );
+        }
+      }
       return json({
         ...(await statusPayload(sb, existing)),
         idempotency_key: key,
@@ -448,9 +783,15 @@ Deno.serve(async (req) => {
       // Surface remaining quota alongside the 402 for the QuotaBadge.
       const ent = await getEntitlementState(sb, user.id);
       throw paymentRequired(
-        (e as { code?: string }).code === "hd_requires_pack" ? "hd_requires_pack" : "quota_exhausted",
+        (e as { code?: string }).code === "hd_requires_pack"
+          ? "hd_requires_pack"
+          : "quota_exhausted",
         (e as Error).message,
-        { renders_left: ent.rendersLeft, std_credits: ent.stdCredits, hd_credits: ent.hdCredits },
+        {
+          renders_left: ent.rendersLeft,
+          std_credits: ent.stdCredits,
+          hd_credits: ent.hdCredits,
+        },
       );
     }
 
@@ -466,6 +807,11 @@ Deno.serve(async (req) => {
     // Pose record (0005): keep path leaves the pipeline prompt untouched; the
     // adapt consumer (AI crew) reads garment_refs.meta.pose_* server-side.
     metaExtra.pose_mode = poseMode;
+    if (modalQaConfig && qaUsageDay) {
+      metaExtra.qa_provider = QA_MODAL_PROVIDER;
+      metaExtra.qa_modal_usage_day = qaUsageDay;
+      metaExtra.qa_modal_gpu_usd_per_second = modalQaConfig.gpuUsdPerSecond;
+    }
     if (poseRef) {
       metaExtra.pose_ref_id = poseRef.poseRefId;
       if (poseRef.imageUrl) metaExtra.pose_image_url = poseRef.imageUrl;
@@ -486,13 +832,64 @@ Deno.serve(async (req) => {
         metaExtra,
         poseMode,
         poseRefId: poseRef?.poseRefId ?? null,
+        ...(modalQaConfig && qaUsageDay
+          ? {
+            prepareDispatch: async () => {
+              const { data: reserved, error: reserveError } = await sb.rpc(
+                "consume_qa_modal_slot",
+                {
+                  p_user_id: user.id,
+                  p_day: qaUsageDay,
+                  p_request_key: key,
+                },
+              );
+              if (reserveError) {
+                throw new HttpError(
+                  503,
+                  "qa_modal_limits_unavailable",
+                  "Modal QA limits could not be verified.",
+                );
+              }
+              if (reserved !== true) {
+                throw new HttpError(
+                  429,
+                  "qa_modal_daily_limit",
+                  "The Modal QA daily test limit has been reached.",
+                );
+              }
+            },
+            abortDispatch: async (renderId: string) => {
+              const { data: abortStatus, error: abortError } = await sb.rpc(
+                "abort_qa_modal_render",
+                {
+                  p_user_id: user.id,
+                  p_day: qaUsageDay,
+                  p_request_key: key,
+                  p_render_id: renderId,
+                },
+              );
+              if (abortError) throw abortError;
+              if (
+                abortStatus !== "aborted" && abortStatus !== "claimed" &&
+                abortStatus !== "terminal" && abortStatus !== "missing"
+              ) throw new Error("Modal QA abort returned an invalid state");
+              return abortStatus;
+            },
+          }
+          : {}),
       });
       // RENDER_INLINE (dev / pre-Inngest): run the provider chain in this
       // request and return the finished render instead of a 202 queued stub.
       if (Deno.env.get("RENDER_INLINE") === "true") {
         await processRender(sb, row.id);
         const done = await findRenderByKey(sb, user.id, key);
-        if (!done) throw new HttpError(500, "render_missing", "Render row disappeared mid-process.");
+        if (!done) {
+          throw new HttpError(
+            500,
+            "render_missing",
+            "Render row disappeared mid-process.",
+          );
+        }
         return json({
           ...(await statusPayload(sb, done)),
           idempotency_key: key,
@@ -520,13 +917,25 @@ Deno.serve(async (req) => {
       );
     }
 
+    if (row.status === "done" || row.status === "failed") {
+      const terminal = await findRenderByKey(sb, user.id, key);
+      if (terminal) {
+        return json({
+          ...(await statusPayload(sb, terminal)),
+          idempotency_key: key,
+          cached: false,
+          fallback_eligible: !modalQaRequested,
+        }, 200);
+      }
+    }
+
     return json({
       render_id: row.id,
-      status: "queued",
+      status: row.status,
       cached: false,
-      fallback_eligible: true,
+      fallback_eligible: !modalQaRequested,
       idempotency_key: key,
-    }, 202);
+    }, row.status === "done" || row.status === "failed" ? 200 : 202);
   } catch (e) {
     return toErrorResponse(e);
   }

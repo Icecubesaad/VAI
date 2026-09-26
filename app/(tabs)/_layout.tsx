@@ -50,6 +50,10 @@ export default function TabsLayout() {
         name="shop"
         options={{ title: 'Shop', tabBarIcon: ({ color, size }) => <Icon name="shop" color={color as string} size={size} /> }}
       />
+      <Tabs.Screen
+        name="reel"
+        options={{ title: 'Reel', tabBarIcon: ({ color, size }) => <Icon name="reel" color={color as string} size={size} /> }}
+      />
     </Tabs>
   );
 }

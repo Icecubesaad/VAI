@@ -17,12 +17,19 @@ export interface RenderRow {
   idempotency_key: string;
   attempts: number;
   created_at: string;
+  garment_refs?: { meta?: Record<string, unknown> } | null;
 }
 
-export async function sha256Hex(parts: Array<string | null | undefined>): Promise<string> {
+export async function sha256Hex(
+  parts: Array<string | null | undefined>,
+): Promise<string> {
   const joined = parts.map((p) => p ?? "").join("|");
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(joined));
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(joined),
+  );
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 export interface RenderKeyInput {
@@ -56,13 +63,16 @@ export async function findRenderByKey(
   key: string,
 ): Promise<RenderRow | null> {
   const { data, error } = await sb.from("renders").select(
-    "id,user_id,status,output_url,output_path,provider,mode,tier,idempotency_key,attempts,created_at",
+    "id,user_id,status,output_url,output_path,provider,mode,tier,idempotency_key,attempts,created_at,garment_refs",
   ).eq("user_id", userId).eq("idempotency_key", key).maybeSingle<RenderRow>();
   if (error) throw error;
   return data;
 }
 
 /** A terminally-failed row with the same key must not block a genuine retry. */
-export function isReusableRow(row: RenderRow): boolean {
-  return row.status === "queued" || row.status === "processing" || row.status === "done";
+export function isReusableRow(
+  row: RenderRow,
+): row is RenderRow & { status: "queued" | "processing" | "done" } {
+  return row.status === "queued" || row.status === "processing" ||
+    row.status === "done";
 }
