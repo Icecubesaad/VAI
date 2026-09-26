@@ -251,12 +251,11 @@ export function buildTryonPrompt(ctx: PromptCtx): string {
   ].filter(Boolean).join("; ");
   const lines = [
     "Photorealistic virtual try-on. Dress the person from the FIRST image (base photo) in the garment(s) from the reference image(s).",
-    "Hard constraints: preserve the person's face identity, skin tone and body shape. Do not beautify, slim, or age-shift.",
-    "POSE: give the subject a natural, confident editorial pose that suits the outfit and context — full body visible, weight shifted, hands relaxed. Interpret the pose freshly (never an exact copy of the base pose) unless the meta says pose:exact.",
+    "Hard constraints: preserve the person's face identity, skin tone, body shape and pose EXACTLY. Do not beautify, slim, age-shift, or change the background.",
     conditions ? `Match base-photo conditions — ${conditions}.` : null,
     ctx.mode === "compare"
       ? "Output ONE image, two panels side by side: LEFT = the untouched base photo, RIGHT = the try-on result. Thin neutral divider, no text."
-      : "Output ONLY the try-on result on a flat solid white background — clean studio white, no props, no floor shadows.",
+      : "Output ONLY the try-on result, same framing and aspect as the base photo.",
     ctx.priorFailTags.length > 0
       ? `Avoid these prior failures: ${ctx.priorFailTags.join("; ")}.`
       : null,
@@ -287,9 +286,12 @@ interface JobRow {
 function providerChain(tier: PipelineTier): string[] {
   // VERIFIED Sep-2026 (INTEGRATION-REPORT founder decision #1): Gemini is
   // PRIMARY for try-on, FASHN is fallback-only. Order per tier:
-  //   std/max → google/gemini-3.1-flash-image (OpenRouter) → fashn-std/max
-  // One AI leg + FASHN: the founder's mandated image model IS the top
-  // fidelity leg; FASHN remains the safety fallback. `model_hint` from the
+  //   std → gemini-3.1-flash-image → gemini-3-pro-image → fashn-std
+  //   max → gemini-3-pro-image → gemini-3.1-flash-image → fashn-max
+  // Max leads with pro (not flash) on purpose: the caller spent an HD-pack
+  // One AI leg + FASHN: the founder's mandated image model (OpenRouter
+  // flash-lite) IS the top leg; FASHN remains the safety fallback.
+  // `model_hint` from the
   // client is recorded in render meta for analytics but NEVER reorders this
   // chain — the server owns provider selection and cost attribution.
   return tier === "max"
@@ -300,7 +302,6 @@ function providerChain(tier: PipelineTier): string[] {
 function providerCostUsd(provider: string): number {
   if (provider === "fashn-max") return FASHN_MAX_COST_USD;
   if (provider === "fashn-std") return FASHN_STD_COST_USD;
-  if (provider === OR_IMAGE_MODEL) return GEMINI_STD_COST_USD;
   return GEMINI_STD_COST_USD;
 }
 

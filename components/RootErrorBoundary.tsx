@@ -143,7 +143,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   markText: { fontSize: 24, color: '#6B2E44', fontWeight: '700', fontFamily: 'PlayfairDisplay_700Bold' },
-  title: { fontSize: 23, lineHeight: 29, fontWeight: '700', fontFamily: 'PlayfairDisplay_700Bold', color: '#1D141C', textAlign: 'center' },
+  title: { fontSize: 23, lineHeight: 29, fontWeight: '700', fontFamily: 'PlayfairDisplay_700Bold', color: '#FDF8FA', textAlign: 'center' },
   body: { fontSize: 15, lineHeight: 22, color: '#58474C', textAlign: 'center' },
   retry: {
     marginTop: 8,
@@ -154,7 +154,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#3A2331',
     paddingVertical: 15,
     paddingHorizontal: 16,
-    shadowColor: '#241820',
+    shadowColor: '#000000',
     shadowOpacity: 0.34,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 7 },

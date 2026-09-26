@@ -39,12 +39,12 @@ export default function TabsLayout() {
         options={{ title: 'Closet', tabBarIcon: ({ color, size }) => <Icon name="closet" color={color as string} size={size} /> }}
       />
       <Tabs.Screen
-        name="tryon"
-        options={{
-          title: 'Try On',
-          tabBarStyle: { display: 'none' },
-          tabBarIcon: ({ color, size }) => <Icon name="tryon" color={color as string} size={size} />,
-        }}
+        name="profile"
+        options={{ title: 'Profile', tabBarIcon: ({ color, size }) => <Icon name="profile" color={color as string} size={size} /> }}
+      />
+      <Tabs.Screen
+        name="mix"
+        options={{ title: 'Mix', tabBarIcon: ({ color, size }) => <Icon name="tryon" color={color as string} size={size} /> }}
       />
       <Tabs.Screen
         name="shop"
