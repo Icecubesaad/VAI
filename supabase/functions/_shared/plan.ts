@@ -6,7 +6,12 @@
 // with a rolling 3-day laundry exclusion.
 
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { readTasteContext, readTastePrefs, selectTasteTags, tasteBonus } from "./taste.ts";
+import {
+  readTasteContext,
+  readTastePrefs,
+  selectTasteTags,
+  tasteBonus,
+} from "./taste.ts";
 
 export interface GarmentRow {
   id: string;
@@ -54,10 +59,20 @@ export interface DayPlan {
 }
 
 const FORMALITY_BY_DRESS: Record<string, number> = {
-  active: 1, gym: 1, casual: 2, creative: 2, office: 3, smart: 3, evening: 4, formal: 5,
+  active: 1,
+  gym: 1,
+  casual: 2,
+  creative: 2,
+  office: 3,
+  smart: 3,
+  evening: 4,
+  formal: 5,
 };
 
-function targetFormality(occasion: string | undefined, dressCode: string | undefined): number {
+function targetFormality(
+  occasion: string | undefined,
+  dressCode: string | undefined,
+): number {
   const key = `${occasion ?? ""} ${dressCode ?? ""}`.toLowerCase();
   for (const [k, f] of Object.entries(FORMALITY_BY_DRESS)) {
     if (key.includes(k)) return f;
@@ -76,11 +91,15 @@ export async function getWeather(
   date: string,
 ): Promise<Weather> {
   const fallback: Weather = { tempC: 20, code: 0 };
-  if (lat === undefined || lon === undefined || !Number.isFinite(lat) || !Number.isFinite(lon)) {
+  if (
+    lat === undefined || lon === undefined || !Number.isFinite(lat) ||
+    !Number.isFinite(lon)
+  ) {
     return fallback;
   }
   try {
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
+    const url =
+      `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
       `&daily=temperature_2m_max,weathercode&timezone=auto&start_date=${date}&end_date=${date}`;
     const res = await fetch(url);
     if (!res.ok) return fallback;
@@ -96,7 +115,10 @@ export async function getWeather(
   }
 }
 
-export async function fetchCloset(sb: SupabaseClient, userId: string): Promise<GarmentRow[]> {
+export async function fetchCloset(
+  sb: SupabaseClient,
+  userId: string,
+): Promise<GarmentRow[]> {
   const { data, error } = await sb.from("garments")
     .select("id,category,subcat,colors,fabric,formality,seasons,wear_count")
     .eq("user_id", userId).is("deleted_at", null).limit(500);
@@ -113,7 +135,9 @@ export async function recentWornIds(
   const since = new Date();
   since.setDate(since.getDate() - days);
   const { data, error } = await sb.from("outfits").select("garment_ids,date")
-    .eq("user_id", userId).gte("date", since.toISOString().slice(0, 10)).limit(60);
+    .eq("user_id", userId).gte("date", since.toISOString().slice(0, 10)).limit(
+      60,
+    );
   if (error || !data) return new Map();
   const map = new Map<string, number>();
   const today = Date.now();
@@ -135,18 +159,28 @@ function seasonScore(g: GarmentRow, tempC: number): number {
 }
 
 function paletteTokens(palette: string | null): string[] {
-  return (palette ?? "").toLowerCase().split(/[,/\s]+/).filter((t) => t.length > 2);
+  return (palette ?? "").toLowerCase().split(/[,/\s]+/).filter((t) =>
+    t.length > 2
+  );
 }
 
 function scoreGarment(
   g: GarmentRow,
-  opts: { tempC: number; targetForm: number; palette: string[]; boldness: number; lastWornAge: number | undefined },
+  opts: {
+    tempC: number;
+    targetForm: number;
+    palette: string[];
+    boldness: number;
+    lastWornAge: number | undefined;
+  },
 ): number {
   let score = seasonScore(g, opts.tempC) * 2;
   const form = g.formality ?? 3;
   score += Math.max(0, 2 - Math.abs(form - opts.targetForm)); // 0..2
   const colors = (g.colors ?? []).map((c) => c.toLowerCase());
-  if (colors.some((c) => opts.palette.some((p) => c.includes(p) || p.includes(c)))) score += 1.2;
+  if (
+    colors.some((c) => opts.palette.some((p) => c.includes(p) || p.includes(c)))
+  ) score += 1.2;
   if (opts.lastWornAge !== undefined) {
     score += opts.lastWornAge >= 7 ? 0.5 : -2.5; // unworn-a-week discovery bonus
   } else {
@@ -185,15 +219,22 @@ export async function buildDayOutfit(
 ): Promise<DayPlan> {
   const [{ data: profile }, closet, recent] = await Promise.all([
     sb.from("style_profiles")
-      .select("everyday_style,palette,dress_code,boldness,style_labels").eq("user_id", userId)
+      .select("everyday_style,palette,dress_code,boldness,style_labels").eq(
+        "user_id",
+        userId,
+      )
       .maybeSingle<ProfileRow>(),
     fetchCloset(sb, userId),
     recentWornIds(sb, userId, 14),
   ]);
   if (closet.length === 0) {
-    throw Object.assign(new Error("Closet is empty — add at least 3 items first"), {
-      status: 409, code: "closet_empty",
-    });
+    throw Object.assign(
+      new Error("Closet is empty — add at least 3 items first"),
+      {
+        status: 409,
+        code: "closet_empty",
+      },
+    );
   }
 
   // Taste autopilot (0006): ONE-row read, scaled by style_influence. Taste
@@ -214,12 +255,21 @@ export async function buildDayOutfit(
   }
 
   const weather = await getWeather(input.lat, input.lon, input.date);
-  const targetForm = targetFormality(input.occasion, input.dressCode ?? profile?.dress_code ?? undefined);
-  const palette = paletteTokens(profile?.palette);
+  const targetForm = targetFormality(
+    input.occasion,
+    input.dressCode ?? profile?.dress_code ?? undefined,
+  );
+  const palette = paletteTokens(profile?.palette ?? null);
   const boldness = profile?.boldness ?? 3;
   const exclude = new Set(input.excludeGarmentIds ?? []);
   const sc = (g: GarmentRow) =>
-    scoreGarment(g, { tempC: weather.tempC, targetForm, palette, boldness, lastWornAge: recent.get(g.id) }) +
+    scoreGarment(g, {
+      tempC: weather.tempC,
+      targetForm,
+      palette,
+      boldness,
+      lastWornAge: recent.get(g.id),
+    }) +
     tasteBonus(g, tasteTags, tasteInfluence);
 
   // Candidate A: separates (top + bottom). Candidate B: dress/onepiece.
@@ -235,8 +285,11 @@ export async function buildDayOutfit(
     gs.reduce((s, g) => s + (g ? sc(g) : -3), 0);
 
   const separates = [top, bottom];
-  const useDress = dress && (!top || !bottom || scoreOf([dress]) + 0.4 > scoreOf(separates));
-  const core: GarmentRow[] = useDress && dress ? [dress] : separates.filter((g): g is GarmentRow => !!g);
+  const useDress = dress &&
+    (!top || !bottom || scoreOf([dress]) + 0.4 > scoreOf(separates));
+  const core: GarmentRow[] = useDress && dress
+    ? [dress]
+    : separates.filter((g): g is GarmentRow => !!g);
   if (shoes) core.push(shoes);
   if (outer) core.push(outer);
 
@@ -252,8 +305,12 @@ export async function buildDayOutfit(
     return age === undefined || age >= 7;
   });
   const bits = [
-    `${cap(anchorColor)} anchors this ${input.occasion ?? profile?.dress_code ?? "everyday"} look`,
-    weather.tempC >= 24 ? `breathable pick for ${Math.round(weather.tempC)}°C` : null,
+    `${cap(anchorColor)} anchors this ${
+      input.occasion ?? profile?.dress_code ?? "everyday"
+    } look`,
+    weather.tempC >= 24
+      ? `breathable pick for ${Math.round(weather.tempC)}°C`
+      : null,
     weather.tempC < 12 ? `layered for ${Math.round(weather.tempC)}°C` : null,
     fabricBit ? `${fabricBit} keeps it comfortable` : null,
     outer ? `plus a layer for the chill` : null,

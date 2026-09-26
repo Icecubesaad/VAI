@@ -10,7 +10,15 @@
 // Idempotency: X-Idempotency-Key header > idempotency_key body (either case).
 
 import { admin, requireUser } from "../_shared/auth.ts";
-import { getIdempotencyKey, handleOptions, json, readJson, requireMethod, toErrorResponse } from "../_shared/http.ts";
+import {
+  badRequest,
+  getIdempotencyKey,
+  handleOptions,
+  json,
+  readJson,
+  requireMethod,
+  toErrorResponse,
+} from "../_shared/http.ts";
 import { requestRestyle } from "../_shared/restyle.ts";
 
 interface RestyleBody {
@@ -24,6 +32,7 @@ interface RestyleBody {
   model_hint?: unknown;
   idempotency_key?: unknown;
   idempotencyKey?: unknown;
+  qa_provider?: unknown;
 }
 
 Deno.serve(async (req) => {
@@ -33,18 +42,30 @@ Deno.serve(async (req) => {
     requireMethod(req, "POST");
     const user = await requireUser(req);
     const body = await readJson<RestyleBody>(req);
+    if (body.qa_provider !== undefined) {
+      throw badRequest(
+        "qa_mode_invalid",
+        "Modal QA is available for standard try-on only",
+      );
+    }
 
-    const renderId = typeof body.render_id === "string" ? body.render_id
-      : typeof body.renderId === "string" ? body.renderId : "";
+    const renderId = typeof body.render_id === "string"
+      ? body.render_id
+      : typeof body.renderId === "string"
+      ? body.renderId
+      : "";
 
     const outcome = await requestRestyle(admin(), user.id, {
       renderId,
       note: typeof body.note === "string" ? body.note : "",
-      rewrittenPrompt: typeof body.rewritten_prompt === "string" ? body.rewritten_prompt : null,
+      rewrittenPrompt: typeof body.rewritten_prompt === "string"
+        ? body.rewritten_prompt
+        : null,
       promptTags: Array.isArray(body.prompt_tags)
         ? body.prompt_tags.filter((t): t is string => typeof t === "string")
         : undefined,
-      photoConditions: body.photo_conditions !== null && typeof body.photo_conditions === "object"
+      photoConditions: body.photo_conditions !== null &&
+          typeof body.photo_conditions === "object"
         ? body.photo_conditions as Record<string, unknown>
         : undefined,
       tierHint: typeof body.tier === "string" ? body.tier : null,
