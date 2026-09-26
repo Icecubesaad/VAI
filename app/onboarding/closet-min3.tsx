@@ -46,6 +46,9 @@ export default function ClosetMin3() {
   // Last failed attempt — powers the Retry button so a dead network never
   // eats the user's pick (the screenshot-3 dead end: generic red line, no retry).
   const [lastAttempt, setLastAttempt] = useState<{ uri: string; source: Garment['source'] } | null>(null);
+  // Soft notice when an item lands without AI tags (tagging outage) — the
+  // pick is kept, the user is told exactly what happened.
+  const [notice, setNotice] = useState<string | null>(null);
 
   // Read-only overflow: free closets AT the 50-item cap (>= — the funnel used
   // '>' and let item 51 through while the Closet tab blocked it) cannot add;
@@ -62,6 +65,7 @@ export default function ClosetMin3() {
     async (uri: string, source: Garment['source']) => {
       setBusy('compress');
       setError(null);
+      setNotice(null);
       // Local phase mirror: `busy` state is stale inside this closure (captured
       // at call time), so the catch reads this — never the state value.
       let phase: 'compress' | 'upload' | 'tag' = 'compress';
@@ -126,7 +130,39 @@ export default function ClosetMin3() {
         const { data } = supabase.storage.from(BUCKETS.garments).getPublicUrl(path);
         phase = 'tag';
         setBusy('tag');
-        const tag = await api.autoTag({ imageUrl: data.publicUrl });
+        let tag: Awaited<ReturnType<typeof api.autoTag>>;
+        try {
+          tag = await api.autoTag({ imageUrl: data.publicUrl, source });
+        } catch (tagErr) {
+          try {
+            // One retry for transient blips before degrading.
+            tag = await api.autoTag({ imageUrl: data.publicUrl, source });
+          } catch {
+            // Tagging outage: insert the garment untagged (category is
+            // nullable server-side) instead of throwing the user's pick away.
+            const { data: row, error: rowErr } = await supabase
+              .from('garments')
+              .insert({ user_id: userId, image_url: data.publicUrl, source })
+              .select('id,image_url')
+              .single();
+            if (rowErr || !row) throw tagErr;
+            const tagged = row as { id: string; image_url: string };
+            tag = {
+              id: tagged.id,
+              imageUrl: tagged.image_url,
+              cutoutUrl: null,
+              category: 'top',
+              subcat: 'untagged',
+              colors: [],
+              fabric: null,
+              formality: 3,
+              seasons: ['all'],
+              brand: null,
+              pricePaid: null,
+            };
+            setNotice('Added without AI tags — tagging is briefly unavailable. Your item is safe in your closet.');
+          }
+        }
         const garment: Garment = {
           // REAL garment id from the nested auto-tag unwrapping (P0-2) —
           // Date.now() fallback only if the server ever omits it.
