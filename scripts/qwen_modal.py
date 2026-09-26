@@ -123,6 +123,31 @@ def _run_pipe(pipe, person: bytes, garments: list[bytes], steps: int, seed: int)
     return output.getvalue()
 
 
+def _run_pipe_prompt(pipe, person: bytes, garments: list[bytes], prompt: str, steps: int, seed: int) -> bytes:
+    import torch
+    from PIL import Image
+
+    references = [
+        Image.open(io.BytesIO(data)).convert("RGB")
+        for data in [person, *garments]
+    ]
+    with torch.inference_mode():
+        result = pipe(
+            image=references,
+            prompt=prompt,
+            generator=torch.Generator(device="cuda").manual_seed(seed),
+            true_cfg_scale=1.0,
+            num_inference_steps=steps,
+            guidance_scale=1.0,
+            num_images_per_prompt=1,
+            width=WIDTH,
+            height=HEIGHT,
+        ).images[0]
+    output = io.BytesIO()
+    result.save(output, format="PNG")
+    return output.getvalue()
+
+
 @app.function(
     image=cache_image,
     volumes={CACHE_DIR: model_cache},
@@ -222,14 +247,22 @@ def bulk_batch(
     garment_images: list[bytes],
     steps: int = 24,
     base_seed: int = 42,
+    prompts: list[str] | None = None,
 ) -> list[bytes]:
     # One model load per container, then sequential generations — the cheap
     # way to batch: load cost is amortized over the whole chunk.
     pipe = _load_pipe()
-    return [
-        _run_pipe(pipe, person_image, [garment], steps, base_seed + index)
-        for index, garment in enumerate(garment_images)
-    ]
+    if prompts is not None and len(prompts) != len(garment_images):
+        raise ValueError("prompts must align with garment_images")
+    outputs = []
+    for index, garment in enumerate(garment_images):
+        if prompts is not None:
+            outputs.append(
+                _run_pipe_prompt(pipe, person_image, [garment], prompts[index], steps, base_seed + index)
+            )
+        else:
+            outputs.append(_run_pipe(pipe, person_image, [garment], steps, base_seed + index))
+    return outputs
 
 
 @app.local_entrypoint()
@@ -315,3 +348,83 @@ def bulk(
             out.write_bytes(image)
             print(f"Saved: {out}")
     print("Bulk complete.")
+
+
+def _reel_prompt(theme: str) -> str:
+    if theme == "cover":
+        return (
+            "High-fashion magazine cover photograph of this exact person wearing the "
+            "garment from image 2. Editorial studio lighting, elegant pose, confident "
+            "gaze, large chic masthead text 'VAI' at the top, small cover lines at the "
+            "sides. Keep her face, identity, and body exactly as in image 1."
+        )
+    places = {
+        "santorini": "white-washed cliffside terraces of Santorini, Greece at golden hour, blue domes and the Aegean sea behind her",
+        "maldives": "a Maldives overwater villa deck at sunrise, turquoise lagoon and wooden walkway behind her",
+        "paris": "a quiet Parisian street at dusk with the Eiffel Tower glowing softly in the distance",
+        "kyoto": "the vermilion torii gate path of Fushimi Inari in Kyoto in soft morning light",
+        "amalfi": "the Amalfi Coast cliff road with pastel villages and the Mediterranean sparkling behind her",
+        "alps": "an alpine lake dock in the Swiss Alps with snow-capped peaks mirrored in still water",
+        "dubai": "the Dubai Marina skyline at night, illuminated towers reflecting on the water",
+        "bali": "a lush Bali jungle swing terrace with rice terraces and palm valley behind her",
+    }
+    if theme not in places:
+        raise ValueError(f"Unknown reel theme: {theme}")
+    return (
+        f"Full-body editorial fashion photograph of this exact person wearing the "
+        f"garment from image 2, striking a new confident pose in front of {places[theme]}. "
+        "Keep her face, identity, and body exactly as in image 1. Photorealistic, "
+        "golden-hour light, shallow depth of field, magazine-editorial composition."
+    )
+
+
+@app.local_entrypoint()
+def reel(
+    person_image: str,
+    garments_dir: str,
+    themes: str = "cover,santorini,maldives,paris,kyoto,amalfi,alps,dubai",
+    out_dir: str = "./.hoplite/artifacts/qwen/reel",
+    steps: int = 24,
+    seed: int = 42,
+    batches: int = 4,
+) -> None:
+    person_path = Path(person_image)
+    if not person_path.is_file():
+        raise FileNotFoundError(f"Person image not found: {person_path}")
+    theme_list = [part.strip() for part in themes.split(",") if part.strip()]
+    files = sorted(
+        path for path in Path(garments_dir).iterdir()
+        if path.suffix.lower() in IMAGE_EXTS
+    )
+    if not files:
+        raise FileNotFoundError(f"No garment images in: {garments_dir}")
+
+    pairs = [(files[index % len(files)], theme) for index, theme in enumerate(theme_list)]
+    chunks = [pairs[index::batches] for index in range(batches)]
+    chunks = [chunk for chunk in chunks if chunk]
+    person_bytes = person_path.read_bytes()
+    print(f"Reel: {len(pairs)} images | {len(chunks)} parallel containers")
+
+    results = list(
+        bulk_batch.starmap(
+            [
+                (
+                    person_bytes,
+                    [path.read_bytes() for path, _ in chunk],
+                    steps,
+                    seed,
+                    [_reel_prompt(theme) for _, theme in chunk],
+                )
+                for chunk in chunks
+            ]
+        )
+    )
+
+    destination = Path(out_dir)
+    destination.mkdir(parents=True, exist_ok=True)
+    for chunk, images in zip(chunks, results):
+        for (path, theme), image in zip(chunk, images):
+            out = destination / f"reel_{theme}_{path.stem}.png"
+            out.write_bytes(image)
+            print(f"Saved: {out}")
+    print("Reel complete.")
